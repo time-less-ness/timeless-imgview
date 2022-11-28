@@ -53,3 +53,10 @@ When in the app, you may navigate images like so:
 This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it does
 not handle WEBM or JPG2000.
 
+# FAQ
+**Q** It stopped working! Help?
+
+**A** Yeah, Homebrew keeps breaking my Python whenever I upgrade or install something else. Go
+through the installation instructions again. If you know how to fix this, submit a PR. I think
+Linux has this problem less often.
+
