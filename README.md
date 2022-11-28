@@ -1,6 +1,7 @@
 # Timeless Image Viewer
-Various image viewers keep disappearing. I needed one that works on Linux and Mac. I could not
-find one that suited my purposes. So I wrote my own. This one works for me.
+Various good CLI image viewers keep disappearing. I needed one that works on
+Linux and Mac. I could not find one that suited my purposes. So I wrote my own.
+This one works for me.
 
 # Installation
 The brew command is needed for Mac. I believe most Linux can just do the python3 portion.
@@ -8,7 +9,7 @@ The brew command is needed for Mac. I believe most Linux can just do the python3
 # mac only
 brew install python@3.7
 
-#mac/linux both hooray
+# mac/linux both
 python3 -m pip install reusables kivy
 ```
 
@@ -21,16 +22,29 @@ ln -s /path/to/timeless_imgview.py ./
 ```
 
 Now you can run it. You must pass it at least one argument, eg a directory with images in it.
+Some ways you might want to invoke this:
 
 ```
+# view all images in imageDir/
 timeless_imgview.py imageDir/
+
+# view all images in all subdirectories
 timeless_imgview.py */
-```
 
-You can also pass it images, and it will display them in the order you gave them.
+# view only JPGs in all subdirectories
+timeless_imgview.py */*.jpg
 
-```
+# pass it images, and it will display them in the order you gave them.
 timeless_imgview.py img5.jpg img3.jpg img9.jpg
+
+# all boats/snow images in all subdirectories
+timeless_imgview.py $( ls -a1R | egrep 'boat|snow|Boat|Snow' )
+
+# images with file size 150k or less
+timeless_imgview.py $( find . -size -150 -name '*.jpg' )
+
+# view images sorted by filesize (helps find dups, for example)
+timeless_imgview.py $( ls -al Montages/*.jpg | awk '{print $5" "$9}' | sort -n | awk '{print $2}' )
 ```
 
 # Using
