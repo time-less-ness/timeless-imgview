@@ -36,15 +36,15 @@ timeless_imgview.py img5.jpg img3.jpg img9.jpg
 # Using
 When in the app, you may navigate images like so:
 
-`; '` - left/right one image
-`, .` - randomise images and go through them left/right
-`- =` - zoom out/in to the image
-`z` - show image 1:1 pixel-wise
-`x` - fit the image to your screen
-`2` - view image double size
-`3` - view image triple size
-`del-del` - pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder
-`qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W)
+ * `; '` - left/right one image
+ * `, .` - randomise images and go through them left/right
+ * `- =` - zoom out/in to the image
+ * `z` - show image 1:1 pixel-wise
+ * `x` - fit the image to your screen
+ * `2` - view image double size
+ * `3` - view image triple size
+ * `del-del` - pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder
+ * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W)
 
 # Image Support
 This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it does
