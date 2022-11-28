@@ -37,8 +37,7 @@ timeless_imgview.py img5.jpg img3.jpg img9.jpg
 When in the app, you may navigate images like so:
 
  * `arrow keys` - scroll around the image if larger than fit to screen
- * `; '` - left/right one image
- * `: "` - left/right 10 images
+ * `; '` - left/right one image (hold shift for 10, Ctrl for 50 images)
  * `, .` - randomise images and go through them left/right
  * `- =` - zoom out/in to the image
  * `z` - show image 1:1 pixel-wise
