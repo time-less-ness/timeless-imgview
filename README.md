@@ -36,11 +36,15 @@ timeless_imgview.py img5.jpg img3.jpg img9.jpg
 # Using
 When in the app, you may navigate images like so:
 
+ * `arrow keys` - scroll around the image if larger than fit to screen
  * `; '` - left/right one image
+ * `: "` - left/right 10 images
  * `, .` - randomise images and go through them left/right
  * `- =` - zoom out/in to the image
  * `z` - show image 1:1 pixel-wise
  * `x` - fit the image to your screen
+ * `s` - begin a slideshow, showing a new image every few seconds
+ * `f` - fullscreen mode (this is buggy in Mac and Linux, be prepared for program to fail)
  * `2` - view image double size
  * `3` - view image triple size
  * `del-del` - pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder
