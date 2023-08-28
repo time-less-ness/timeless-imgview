@@ -32,7 +32,7 @@ class ImageViewer(FloatLayout):
             self.deviceRes = [800, 600]
         self.fullscreen_mode = False
         # zoom of window itself
-        self.windowZoom = 0.8
+        self.windowZoom = 1
         self.imgZoom = 1
 
         # Capture keyboard input
@@ -80,6 +80,11 @@ class ImageViewer(FloatLayout):
         # such as Q/Esc to quit, or Del to delete
         self.lastQuitPressTimestamp = 0
         self.lastDelPressTimestamp = 0
+
+        # for maximising and unmaximising
+        self.unmaxSize = None
+        self.winTop = None
+        self.winLeft = None
 
         # now that image loaded, also load cached next
         try:
@@ -265,15 +270,6 @@ class ImageViewer(FloatLayout):
         elif text == "]":
             self.log.debug(f"Rotate +90")
             self.image.rotation = 90
-        ## # SORTING -----
-        ## elif text in ('1', '!') and 'shift' in modifiers:
-        ##     # view images in alpha order
-        ##     tmpImg = self.imageSet['orderedList'][self.imageSet['setPos']]
-        ##     self._get_images()
-        ##     self.imageSet['orderedList'].sort(key=lambda x: x['image'])
-        ##     self.imageSet['setPos'] = self.imageSet['orderedList'].index(tmpImg)
-        ##     self.image.gen_image()
-        ##     self.image.reload()
         # ZOOMING -----
         elif text in ("-", "_"):
             if 'shift' in modifiers:
@@ -309,7 +305,13 @@ class ImageViewer(FloatLayout):
             self.image.size[1] = self.image.texture_size[1] * self.imgZoom
             self.image.zoomMode = 'pan'
             self.image.set_window_pos()
-        elif text == 'z':
+        elif text == '4':
+            self.imgZoom = 4
+            self.image.size[0] = self.image.texture_size[0] * self.imgZoom
+            self.image.size[1] = self.image.texture_size[1] * self.imgZoom
+            self.image.zoomMode = 'pan'
+            self.image.set_window_pos()
+        elif text in ('z', '1'):
             # view 1:1
             self.imgZoom = 1
             self.image.zoomMode = 'pan'
@@ -340,14 +342,19 @@ class ImageViewer(FloatLayout):
         elif text == 'f':
             if self.fullscreen_mode == False:
                 self.fullscreen_mode = True
-                Window.size = (self.deviceRes[0], self.deviceRes[1])
-                self.size = Window.size
-                Window.fullscreen = True
+                self.unmaxSize = Window.size
+                self.winLeft = Window.left
+                self.winTop = Window.top
+                Window.top = 0
+                Window.left = 0
+                Window.borderless = True
+                Window.maximize()
             else:
                 self.fullscreen_mode = False
-                Window.fullscreen = False
-                Window.size = (int(self.deviceRes[0] * self.windowZoom), int(self.deviceRes[1] * self.windowZoom))
-                self.size = Window.size
+                Window.borderless = False
+                Window.size = self.unmaxSize
+                Window.top = self.winTop
+                Window.left = self.winLeft
         # QUIT ----
         elif text == 'Q' or text == 'q':
             currTs = time.time()
