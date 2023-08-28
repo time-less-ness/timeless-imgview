@@ -81,6 +81,11 @@ class ImageViewer(FloatLayout):
         self.lastQuitPressTimestamp = 0
         self.lastDelPressTimestamp = 0
 
+        # for maximising and unmaximising
+        self.unmaxSize = None
+        self.winTop = None
+        self.winLeft = None
+
         # now that image loaded, also load cached next
         try:
             self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image'])
@@ -265,15 +270,6 @@ class ImageViewer(FloatLayout):
         elif text == "]":
             self.log.debug(f"Rotate +90")
             self.image.rotation = 90
-        ## # SORTING -----
-        ## elif text in ('1', '!') and 'shift' in modifiers:
-        ##     # view images in alpha order
-        ##     tmpImg = self.imageSet['orderedList'][self.imageSet['setPos']]
-        ##     self._get_images()
-        ##     self.imageSet['orderedList'].sort(key=lambda x: x['image'])
-        ##     self.imageSet['setPos'] = self.imageSet['orderedList'].index(tmpImg)
-        ##     self.image.gen_image()
-        ##     self.image.reload()
         # ZOOMING -----
         elif text in ("-", "_"):
             if 'shift' in modifiers:
@@ -346,15 +342,19 @@ class ImageViewer(FloatLayout):
         elif text == 'f':
             if self.fullscreen_mode == False:
                 self.fullscreen_mode = True
+                self.unmaxSize = Window.size
+                self.winLeft = Window.left
+                self.winTop = Window.top
+                Window.top = 0
+                Window.left = 0
                 Window.borderless = True
-                Window.size = (self.deviceRes[0], self.deviceRes[1])
-                self.size = Window.size
+                Window.maximize()
             else:
                 self.fullscreen_mode = False
                 Window.borderless = False
-                Window.fullscreen = False
-                Window.size = (int(self.deviceRes[0] * self.windowZoom), int(self.deviceRes[1] * self.windowZoom))
-                self.size = Window.size
+                Window.size = self.unmaxSize
+                Window.top = self.winTop
+                Window.left = self.winLeft
         # QUIT ----
         elif text == 'Q' or text == 'q':
             currTs = time.time()
