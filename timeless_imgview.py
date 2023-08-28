@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.10
 
 import subprocess
 import reusables
@@ -15,6 +15,7 @@ from tiviewlib.ImageViewer import ImageViewer
 log = reusables.get_logger('pyview', level=logging.INFO)
 
 deviceRes = [3456, 2234]
+resStr = None
 if platform == 'linux':
     subProcessCmd = "xdpyinfo  | grep -oP 'dimensions:\s+\K\S+'"
     ps = subprocess.Popen(subProcessCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -22,14 +23,20 @@ if platform == 'linux':
 elif platform == 'macosx':
     subProcessCmd = "system_profiler SPDisplaysDataType | grep Resolution | xargs"
     ps = subprocess.Popen(subProcessCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    resBits = re.findall(r'\d\d\d+', ps.communicate()[0].decode())
+    resStr = ps.communicate()[0].decode()
+    resBits = re.findall(r'\d\d\d+', resStr)
     deviceRes = [int(resBits[0]), int(resBits[1])]
+
+log.info(f"Got deviceRes={deviceRes}")
 
 # TODO pull this from settings file to keep track of
 # preference from run-to-run - also, if we pass in --size,
 # don't override that
-Window.size = (int (deviceRes[0] * 0.5), deviceRes[1])
-Window.left = int (deviceRes[0] * .25)
+if "Retina" in resStr:
+    Window.size = (int(deviceRes[0] / 2), deviceRes[1])
+else:
+    Window.size = (deviceRes[0], deviceRes[1])
+Window.left = 0
 Window.top = 0
 
 # hide cursur unless move mouse
