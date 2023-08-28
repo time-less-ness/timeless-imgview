@@ -27,7 +27,7 @@ elif platform == 'macosx':
     resBits = re.findall(r'\d\d\d+', resStr)
     deviceRes = [int(resBits[0]), int(resBits[1])]
 
-log.info(f"Got deviceRes={deviceRes}")
+log.debug(f"Got deviceRes={deviceRes}")
 
 # TODO pull this from settings file to keep track of
 # preference from run-to-run - also, if we pass in --size,
