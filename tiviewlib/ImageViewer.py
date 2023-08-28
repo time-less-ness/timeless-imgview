@@ -32,7 +32,7 @@ class ImageViewer(FloatLayout):
             self.deviceRes = [800, 600]
         self.fullscreen_mode = False
         # zoom of window itself
-        self.windowZoom = 0.8
+        self.windowZoom = 1
         self.imgZoom = 1
 
         # Capture keyboard input
@@ -309,7 +309,13 @@ class ImageViewer(FloatLayout):
             self.image.size[1] = self.image.texture_size[1] * self.imgZoom
             self.image.zoomMode = 'pan'
             self.image.set_window_pos()
-        elif text == 'z':
+        elif text == '4':
+            self.imgZoom = 4
+            self.image.size[0] = self.image.texture_size[0] * self.imgZoom
+            self.image.size[1] = self.image.texture_size[1] * self.imgZoom
+            self.image.zoomMode = 'pan'
+            self.image.set_window_pos()
+        elif text in ('z', '1'):
             # view 1:1
             self.imgZoom = 1
             self.image.zoomMode = 'pan'
@@ -340,11 +346,12 @@ class ImageViewer(FloatLayout):
         elif text == 'f':
             if self.fullscreen_mode == False:
                 self.fullscreen_mode = True
+                Window.borderless = True
                 Window.size = (self.deviceRes[0], self.deviceRes[1])
                 self.size = Window.size
-                Window.fullscreen = True
             else:
                 self.fullscreen_mode = False
+                Window.borderless = False
                 Window.fullscreen = False
                 Window.size = (int(self.deviceRes[0] * self.windowZoom), int(self.deviceRes[1] * self.windowZoom))
                 self.size = Window.size

@@ -12,7 +12,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.utils import platform
 from tiviewlib.ImageViewer import ImageViewer
 
-log = reusables.get_logger('pyview', level=logging.DEBUG)
+log = reusables.get_logger('pyview', level=logging.INFO)
 
 deviceRes = [3456, 2234]
 if platform == 'linux':
@@ -23,15 +23,13 @@ elif platform == 'macosx':
     subProcessCmd = "system_profiler SPDisplaysDataType | grep Resolution | xargs"
     ps = subprocess.Popen(subProcessCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     resBits = re.findall(r'\d\d\d+', ps.communicate()[0].decode())
-    deviceRes = [int(resBits[0]) / 2, int(resBits[1]) / 2]
+    deviceRes = [int(resBits[0]), int(resBits[1])]
 
 # to-do, pull this from settings file to keep track of
 # preference from run-to-run
 Window.size = (deviceRes[0], deviceRes[1])
 Window.top = 0
 Window.left = 0
-## dunno WTF this does - nothing good
-#Window.borderless = 1
 
 # works now, but kinda prefer maximise for the moment
 # Window.fullscreen = True
