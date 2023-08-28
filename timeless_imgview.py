@@ -25,11 +25,12 @@ elif platform == 'macosx':
     resBits = re.findall(r'\d\d\d+', ps.communicate()[0].decode())
     deviceRes = [int(resBits[0]), int(resBits[1])]
 
-## # to-do, pull this from settings file to keep track of
-## # preference from run-to-run
-## Window.size = (deviceRes[0], deviceRes[1])
-## Window.top = 0
-## Window.left = 0
+# TODO pull this from settings file to keep track of
+# preference from run-to-run - also, if we pass in --size,
+# don't override that
+Window.size = (int (deviceRes[0] * 0.5), deviceRes[1])
+Window.left = int (deviceRes[0] * .25)
+Window.top = 0
 
 # hide cursur unless move mouse
 def on_motion(self, etype, me):
