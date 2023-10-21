@@ -14,8 +14,8 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.utils import platform
 from tiviewlib.ImageViewer import ImageViewer
 
-log = reusables.get_logger('pyview', level=logging.DEBUG)
-#log = reusables.get_logger('pyview', level=logging.INFO)
+#log = reusables.get_logger('pyview', level=logging.DEBUG)
+log = reusables.get_logger('pyview', level=logging.INFO)
 
 deviceRes = [3456, 2234]
 resStr = None
@@ -42,17 +42,27 @@ if config.read(config_filename) == []:
     f.write("NoSuchSettingYet = True\n")
     f.write("\n")
     f.write("[LastRun]\n")
-    f.write("WindowSize = 1280,760\n")
-    f.write("WindowPosition = 0,0\n")
+    f.write("lastgeom = 1920x1080+0,0\n")
     f.close()
 config.read(config_filename)
 log.debug(f"Got config={config}")
 
-window_size_strings = config.get('LastRun', 'WindowSize').split(',')
-Window.size = (int(window_size_strings[0]), int(window_size_strings[1]))
-window_position_strings = config.get('LastRun', 'WindowPosition').split(',')
-Window.left = int(window_position_strings[0])
-Window.top = int(window_position_strings[1])
+# read size from directory
+try:
+    window_geom = config.get('LastRun', f'{os.getcwd()}--geom')
+except:
+    window_geom = config.get('LastRun', f'lastgeom')
+
+# try parsing stuff, but assume it'll get f'd somehow
+try:
+    [wsz,wpos] = window_geom.split("+")
+    Window.size = [int(n) for n in wsz.split('x')]
+    Window.left = int(wpos.split(',')[0])
+    Window.top = int(wpos.split(',')[1])
+except:
+    Window.size = [1920, 1080]
+    Window.left = 0
+    Window.top = 0
 
 # hide cursur unless move mouse
 def on_motion(self, etype, me):
@@ -98,8 +108,9 @@ class TimelessImageView(App):
 if __name__ == '__main__':
     TimelessImageView().run()
     log.info(f'Writing Configuration into {config_filename}!')
-    config.set('LastRun', 'WindowSize', ','.join([str(n) for n in Window.size]))
-    config.set('LastRun', 'WindowPosition', f'{str(Window.left)},{str(Window.top)}')
+    output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
+    config.set('LastRun', f'{os.getcwd()}--geom', output_geom)
+    config.set('LastRun', f'lastgeom', output_geom)
     with open(config_filename, 'w') as configfile:
         config.write(configfile)
 
