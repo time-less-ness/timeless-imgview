@@ -109,6 +109,8 @@ if __name__ == '__main__':
     TimelessImageView().run()
     log.info(f'Writing Configuration into {config_filename}!')
     output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
+    # re-read in case another version overwrote
+    config.read(config_filename)
     config.set('LastRun', f'{os.getcwd()}--geom', output_geom)
     config.set('LastRun', f'lastgeom', output_geom)
     with open(config_filename, 'w') as configfile:
