@@ -108,11 +108,9 @@ class TimelessImageView(App):
 if __name__ == '__main__':
     TimelessImageView().run()
     log.info(f'Writing Configuration into {config_filename}!')
-    if "Retina 5K" in resStr:
+    if "Retina" in resStr:
+        # iMac27in Retina and mbp16in
         # for some reason you have to divide window width/height by two, but not the location
-        # also I think some Retina devices have different DPI so dividing by 2 isn't always
-        # correct, but documentation on this seems sparse. doesn't help that Kivy docs are also
-        # pretty sparse on complex topics like this.
         output_geom = f"{str(int(Window.size[0]/2))}x{str(int(Window.size[1]/2))}+{str(int(Window.left))},{str(int(Window.top))}"
     else:
         output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
