@@ -111,7 +111,7 @@ class MainImage(Image):
             self.source = self.gen_image()
 
         try:
-            self.log.debug(f"Caching PREV image {self.imageSet['setPos'] - 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']}")
+            #self.log.debug(f"Caching PREV image {self.imageSet['setPos'] - 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']}")
             self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image'])
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:

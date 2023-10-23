@@ -151,7 +151,7 @@ class ImageViewer(FloatLayout):
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         self.imageSet['orderedList'].remove(img)
-        del_name = img['image']
+        self.log.info(f"Moving img={img['image']} to destDir={destDir}")
         shutil.move(img['image'], destDir)
         self.change_to_image(self.imageSet['setPos'])
 
@@ -236,13 +236,17 @@ class ImageViewer(FloatLayout):
                 self.previousKey = ''
                 self.currKey = ''
                 self.lastScaryTimestamp = 0
+        else:
+            self.previousKey = ''
+            self.currKey = ''
+            self.lastScaryTimestamp = 0
 
         # KEY COMBO ITEMS ----
         if (self.currKey != '' and self.previousKey == 'm'):
             # move the item somewhere
             try:
                 fileDest = self.appConfig.get("ReadOnlySettings", f"movedest-{self.currKey}")
-                self.log.debug(f"Moving the file to fileDest={fileDest}")
+                self.log.info(f"Moving to fileDest={fileDest}")
                 try:
                     self.move_image(os.path.expanduser(fileDest))
                 except:
@@ -369,7 +373,7 @@ class ImageViewer(FloatLayout):
             self.sv.scroll_y = 0.5
         # IMAGE COPY/MOVE/DELETE -----
         elif self.currKey == 'delete' and self.previousKey == 'delete':
-            self.log.debug(f"Delete pressed twice, deleting image!")
+            self.log.info(f"Delete pressed twice, deleting image!")
             self.move_image(self.imageSet['del_dir'])
         elif text == 'c' and 'control' in modifiers:
             # TODO
