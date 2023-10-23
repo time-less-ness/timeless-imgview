@@ -85,7 +85,7 @@ class MainWindow(FloatLayout):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.image_view = ImageViewer(deviceRes=deviceRes, log=log)
+        self.image_view = ImageViewer(appConfig=config, deviceRes=deviceRes, log=log)
         self.add_widget(self.image_view)
 
     def on_enter(self):

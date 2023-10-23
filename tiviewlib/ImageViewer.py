@@ -20,6 +20,7 @@ class ImageViewer(FloatLayout):
     def __init__(self,
             delete_dir=f"{os.environ['HOME']}/.Trash",
             deviceRes=None,
+            appConfig=None,
             log=None,
             **kwargs):
         super().__init__(**kwargs)
@@ -34,6 +35,9 @@ class ImageViewer(FloatLayout):
         # zoom of window itself
         self.windowZoom = 1
         self.imgZoom = 1
+
+        if appConfig != None:
+            self.appConfig = appConfig
 
         # Capture keyboard input
         self._keyboard = Window.request_keyboard(self._keyboard_closed, self)
@@ -77,9 +81,10 @@ class ImageViewer(FloatLayout):
         self.slideshowInterval = 40
 
         # for scary actions, you double-tap the command,
-        # such as Q/Esc to quit, or Del to delete
-        self.lastQuitPressTimestamp = 0
-        self.lastDelPressTimestamp = 0
+        # such as Q/Esc to quit, or Del to delete, or m+X to move
+        self.lastScaryTimestamp = 0
+        self.previousKey = ''
+        self.currKey = ''
 
         # for maximising and unmaximising
         self.unmaxSize = None
@@ -142,11 +147,12 @@ class ImageViewer(FloatLayout):
         self.sv.width = size[0]
         self.sv.height = size[1]
 
-    def delete_image(self):
+    # move or delete image
+    def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         self.imageSet['orderedList'].remove(img)
         del_name = img['image']
-        shutil.move(img['image'], self.imageSet['del_dir'])
+        shutil.move(img['image'], destDir)
         self.change_to_image(self.imageSet['setPos'])
 
     def reset_scrollpos(self):
@@ -212,6 +218,43 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
+        self.log.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
+
+        # is this an initial press after some delay, or a quick successor?
+        if (keycode[0] >= 97 and keycode[0] <= 122) or (keycode[0] >= 48 and keycode[0] <= 57) or (keycode[1] in ['delete']):
+            # is this a potential double-key combo?
+            currTs = time.time()
+            if currTs - self.lastScaryTimestamp < 1:
+                self.log.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
+                self.currKey = keycode[1]
+            elif (keycode[1] in ['q', 'm', 'delete']):
+                self.log.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
+                self.lastScaryTimestamp = currTs
+                self.previousKey = keycode[1]
+                self.currKey = ''
+            else:
+                self.previousKey = ''
+                self.currKey = ''
+                self.lastScaryTimestamp = 0
+
+        # KEY COMBO ITEMS ----
+        if (self.currKey != '' and self.previousKey == 'm'):
+            # move the item somewhere
+            try:
+                fileDest = self.appConfig.get("ReadOnlySettings", f"movedest-{self.currKey}")
+                self.log.debug(f"Moving the file to fileDest={fileDest}")
+                try:
+                    self.move_image(os.path.expanduser(fileDest))
+                except:
+                    self.log.debug(f"Couldn't move file")
+            except:
+                self.log.info(f"Tried to move to location with no keybinding={self.currKey}")
+
+            self.previousKey = ''
+            self.currKey = ''
+            self.lastScaryTimestamp = 0
+            return True
+
         # PANNING ----
         if keycode[1] == 'up':
             self.scrollAmount = self.calc_scroll_amt(0, modifiers)
@@ -230,7 +273,7 @@ class ImageViewer(FloatLayout):
             if self.scrollEvent == None:
                 self.scrollEvent = Clock.schedule_interval(self.keep_on_scrollin, self.scrollScheduleInterval)
         # SLIDESHOW -----
-        elif keycode[1] == 's':
+        elif text == 's':
             # pull one random image, then schedule more on interval
             self.image.next_image('random')
             self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, self.slideshowInterval)
@@ -325,13 +368,9 @@ class ImageViewer(FloatLayout):
             self.sv.scroll_x = 0.5
             self.sv.scroll_y = 0.5
         # IMAGE COPY/MOVE/DELETE -----
-        elif keycode[1] == 'delete':
-            currTs = time.time()
-            if currTs - self.lastDelPressTimestamp < 1:
-                self.log.debug(f"Delete image")
-                self.delete_image()
-            else:
-                self.lastDelPressTimestamp = currTs
+        elif self.currKey == 'delete' and self.previousKey == 'delete':
+            self.log.debug(f"Delete pressed twice, deleting image!")
+            self.move_image(self.imageSet['del_dir'])
         elif text == 'c' and 'control' in modifiers:
             # TODO
             self.log.debug(f"Copy image")
@@ -356,11 +395,9 @@ class ImageViewer(FloatLayout):
                 Window.top = self.winTop
                 Window.left = self.winLeft
         # QUIT ----
-        elif text == 'Q' or text == 'q':
-            currTs = time.time()
-            if currTs - self.lastQuitPressTimestamp < 1:
-                # shut it down
-                App.get_running_app().stop()
-            else:
-                self.lastQuitPressTimestamp = currTs
+        elif self.currKey == 'q' and self.previousKey == 'q':
+            # shut it down
+            self.log.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
+            App.get_running_app().stop()
+
         return True
