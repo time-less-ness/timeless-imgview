@@ -370,7 +370,6 @@ class ImageViewer(FloatLayout):
             self.sv.scroll_y = 0.5
         # IMAGE COPY/MOVE/DELETE -----
         elif self.currKey == 'delete' and self.previousKey == 'delete':
-            Logger.info(f"Delete pressed twice, deleting image!")
             self.move_image(self.imageSet['del_dir'])
         elif text == 'c' and 'control' in modifiers:
             # TODO

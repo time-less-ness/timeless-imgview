@@ -35,7 +35,7 @@ Logger.debug(f"Got deviceRes={deviceRes}")
 
 # pull this from settings file to keep track of preference from run-to-run
 # TODO: if we pass in --size, don't override that
-config_filename = os.path.expanduser('~/.tivewrc')
+config_filename = os.path.expanduser('~/.tiviewrc')
 config = configparser.ConfigParser()
 if config.read(config_filename) == []:
     f = open(config_filename, "w")
