@@ -150,10 +150,13 @@ class ImageViewer(FloatLayout):
     # move or delete image
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
-        self.imageSet['orderedList'].remove(img)
-        self.log.info(f"Moving img={img['image']} to destDir={destDir}")
-        shutil.move(img['image'], destDir)
-        self.change_to_image(self.imageSet['setPos'])
+        if os.path.exists(f"{destDir}/{img['image']}"):
+            self.log.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
+        else:
+            self.log.info(f"Moving img={img['image']} to destDir={destDir}")
+            shutil.move(img['image'], destDir)
+            self.imageSet['orderedList'].remove(img)
+            self.change_to_image(self.imageSet['setPos'])
 
     def reset_scrollpos(self):
         self.sv.scroll_x = 0
@@ -246,11 +249,7 @@ class ImageViewer(FloatLayout):
             # move the item somewhere
             try:
                 fileDest = self.appConfig.get("ReadOnlySettings", f"movedest-{self.currKey}")
-                self.log.info(f"Moving to fileDest={fileDest}")
-                try:
-                    self.move_image(os.path.expanduser(fileDest))
-                except:
-                    self.log.debug(f"Couldn't move file")
+                self.move_image(os.path.expanduser(fileDest))
             except:
                 self.log.info(f"Tried to move to location with no keybinding={self.currKey}")
 
