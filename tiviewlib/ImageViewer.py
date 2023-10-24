@@ -11,6 +11,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.loader import Loader
+from kivy.logger import Logger
 from kivy.app import App
 from tiviewlib.MainImage import MainImage
 #from tiviewlib.kivy_hover import MouseOver
@@ -21,10 +22,8 @@ class ImageViewer(FloatLayout):
             delete_dir=f"{os.environ['HOME']}/.Trash",
             deviceRes=None,
             appConfig=None,
-            log=None,
             **kwargs):
         super().__init__(**kwargs)
-        self.log = log
 
         # setup fullscreen status and device resolution
         if deviceRes != None:
@@ -57,7 +56,7 @@ class ImageViewer(FloatLayout):
         self._get_images()
 
         # Define widgets used so we can reference them elsewhere
-        self.image = MainImage(imageSet=self.imageSet, log=self.log)
+        self.image = MainImage(imageSet=self.imageSet)
         self.sv = ScrollView(size=Window.size)
         self.sv.scroll_x = 0.5
         self.sv.scroll_y = 0.5
@@ -121,14 +120,14 @@ class ImageViewer(FloatLayout):
                             data = {'image': dirName + imgName, 'created': 0}
                             self.imageSet['orderedList'].append(data)
                 except:
-                    self.log.error(f"Couldn't collect images from {dirName}")
-                self.log.debug(f"Collected files from {dirName} - total so far: {len(self.imageSet['orderedList'])}")
+                    Logger.error(f"Couldn't collect images from {dirName}")
+                Logger.debug(f"Collected files from {dirName} - total so far: {len(self.imageSet['orderedList'])}")
             elif os.path.isfile(inArg):
                 toSort = False
                 data = {'image': inArg, 'created': 0}
                 self.imageSet['orderedList'].append(data)
             else:
-                self.log.error(f"Input {inArg} is neither file nor directory. Ignoring.")
+                Logger.error(f"Input {inArg} is neither file nor directory. Ignoring.")
 
         # they come in some random order, so put them in filename order
         if toSort:
@@ -136,7 +135,7 @@ class ImageViewer(FloatLayout):
 
     def on_size(self, obj, size):
         """Make sure all children sizes adjust properly"""
-        #self.log.debug(f"Resizing image itself to {size[0]}x{size[1]}, obj={obj}")
+        #Logger.debug(f"Resizing image itself to {size[0]}x{size[1]}, obj={obj}")
         self.image.size_hint_x = None
         self.image.size_hint_y = None
         self.image.width = size[0]
@@ -151,9 +150,9 @@ class ImageViewer(FloatLayout):
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         if os.path.exists(f"{destDir}/{img['image']}"):
-            self.log.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
+            Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
         else:
-            self.log.info(f"Moving img={img['image']} to destDir={destDir}")
+            Logger.info(f"Moving img={img['image']} to destDir={destDir}")
             shutil.move(img['image'], destDir)
             self.imageSet['orderedList'].remove(img)
             self.change_to_image(self.imageSet['setPos'])
@@ -213,6 +212,7 @@ class ImageViewer(FloatLayout):
         self.image.next_image('random')
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
+        #Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
         # all keyboard events cancel the slideshow
         if self.slideshowEvent:
             Clock.unschedule(self.slideshowEvent, all=True)
@@ -221,17 +221,15 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
-        self.log.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
-
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) or (keycode[0] >= 48 and keycode[0] <= 57) or (keycode[1] in ['delete']):
             # is this a potential double-key combo?
             currTs = time.time()
             if currTs - self.lastScaryTimestamp < 1:
-                self.log.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
+                Logger.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
                 self.currKey = keycode[1]
             elif (keycode[1] in ['q', 'm', 'delete']):
-                self.log.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
+                Logger.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
                 self.lastScaryTimestamp = currTs
                 self.previousKey = keycode[1]
                 self.currKey = ''
@@ -251,7 +249,7 @@ class ImageViewer(FloatLayout):
                 fileDest = self.appConfig.get("ReadOnlySettings", f"movedest-{self.currKey}")
                 self.move_image(os.path.expanduser(fileDest))
             except:
-                self.log.info(f"Tried to move to location with no keybinding={self.currKey}")
+                Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
 
             self.previousKey = ''
             self.currKey = ''
@@ -311,10 +309,10 @@ class ImageViewer(FloatLayout):
             self.image.prev_image('random')
         # ROTATING -----
         elif text == "[":
-            self.log.debug(f"Rotate -90")
+            Logger.debug(f"Rotate -90")
             self.image.rotation = -90
         elif text == "]":
-            self.log.debug(f"Rotate +90")
+            Logger.debug(f"Rotate +90")
             self.image.rotation = 90
         # ZOOMING -----
         elif text in ("-", "_"):
@@ -372,14 +370,11 @@ class ImageViewer(FloatLayout):
             self.sv.scroll_y = 0.5
         # IMAGE COPY/MOVE/DELETE -----
         elif self.currKey == 'delete' and self.previousKey == 'delete':
-            self.log.info(f"Delete pressed twice, deleting image!")
+            Logger.info(f"Delete pressed twice, deleting image!")
             self.move_image(self.imageSet['del_dir'])
         elif text == 'c' and 'control' in modifiers:
             # TODO
-            self.log.debug(f"Copy image")
-        elif text == 'x' and 'control' in modifiers:
-            # TODO
-            self.log.debug(f"Move image")
+            Logger.debug(f"Copy image")
         # WINDOW MANIPULATIONS ----
         elif text == 'f':
             if self.fullscreen_mode == False:
@@ -400,7 +395,7 @@ class ImageViewer(FloatLayout):
         # QUIT ----
         elif self.currKey == 'q' and self.previousKey == 'q':
             # shut it down
-            self.log.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
+            Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
             App.get_running_app().stop()
 
         return True

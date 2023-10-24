@@ -8,6 +8,7 @@ import reusables
 from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.loader import Loader
+from kivy.logger import Logger
 
 class MainImage(Image):
 
@@ -16,7 +17,6 @@ class MainImage(Image):
             log=None,
             **kwargs):
         self.imageSet = imageSet
-        self.log = log
         self.zoomMode = 'fit'
         super().__init__(source=self.gen_image(), **kwargs)
 
@@ -48,7 +48,7 @@ class MainImage(Image):
 
     def flip_image_changeType(self, changeType):
         if changeType != self.imageSet['changeType']:
-            self.log.debug(f"Flipping from {self.imageSet['changeType']} to {changeType}")
+            Logger.debug(f"Flipping from {self.imageSet['changeType']} to {changeType}")
             tmpImg = self.imageSet['orderedList'][self.imageSet['setPos']]
             if self.imageSet['changeType'] == 'random':
                 self.imageSet['orderedList'].sort(key=lambda x: x['image'])
@@ -84,7 +84,7 @@ class MainImage(Image):
             self.be_zoom_fit()
 
         try:
-            #self.log.debug(f"Caching NEXT image {self.imageSet['setPos'] + 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image']}")
+            #Logger.debug(f"Caching NEXT image {self.imageSet['setPos'] + 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image']}")
             self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image'])
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:
@@ -111,7 +111,7 @@ class MainImage(Image):
             self.source = self.gen_image()
 
         try:
-            #self.log.debug(f"Caching PREV image {self.imageSet['setPos'] - 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']}")
+            #Logger.debug(f"Caching PREV image {self.imageSet['setPos'] - 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']}")
             self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image'])
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:
@@ -120,7 +120,7 @@ class MainImage(Image):
         self.pos = [0,0]
 
     def cacheImage_loaded(self, cacheImage):
-        self.log.debug(f"cacheImage_loaded() called with {cacheImage.filename}")
+        Logger.debug(f"cacheImage_loaded() called with {cacheImage.filename}")
         if cacheImage.texture:
             if self.imageSet['cacheImage'].filename == self.imageSet['orderedList'][self.imageSet['setPos']]['image']:
                 # if there are exactly two images... this excepts
@@ -135,7 +135,7 @@ class MainImage(Image):
         if self.imageSet['setPos'] < 0 or self.imageSet['setPos'] > len(self.imageSet['orderedList']) - 1:
             self.imageSet['setPos'] = 0
 
-        #self.log.debug(f"Grabbing from {self.imageSet['orderedList'][self.imageSet['setPos']]}")
+        #Logger.debug(f"Grabbing from {self.imageSet['orderedList'][self.imageSet['setPos']]}")
         tmpImg = self.imageSet['orderedList'][self.imageSet['setPos']]['image']
         Window.set_title(f"TimelessIV - {tmpImg}")
         return tmpImg

@@ -1,21 +1,22 @@
 #!/usr/bin/env python3.11
 
 import configparser
-import logging
+#import logging
 import os
 import reusables
 import re
 import subprocess
 from kivy.app import App
-from kivy.uix.widget import Widget
+from kivy.logger import Logger, LOG_LEVELS
 from kivy.core.window import Window
+from kivy.uix.widget import Widget
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.utils import platform
 from tiviewlib.ImageViewer import ImageViewer
 
-#log = reusables.get_logger('pyview', level=logging.DEBUG)
-log = reusables.get_logger('pyview', level=logging.INFO)
+#Logger.setLevel(LOG_LEVELS["debug"])
+Logger.setLevel(LOG_LEVELS["info"])
 
 deviceRes = [3456, 2234]
 resStr = None
@@ -30,7 +31,7 @@ elif platform == 'macosx':
     resBits = re.findall(r'\d\d\d+', resStr)
     deviceRes = [int(resBits[0]), int(resBits[1])]
 
-log.debug(f"Got deviceRes={deviceRes}")
+Logger.debug(f"Got deviceRes={deviceRes}")
 
 # pull this from settings file to keep track of preference from run-to-run
 # TODO: if we pass in --size, don't override that
@@ -50,7 +51,7 @@ if config.read(config_filename) == []:
     f.write("lastgeom = 1920x1080+0,0\n")
     f.close()
 config.read(config_filename)
-log.debug(f"Got config={config}")
+Logger.debug(f"Got config={config}")
 
 # read size from directory
 try:
@@ -90,7 +91,7 @@ class MainWindow(FloatLayout):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.image_view = ImageViewer(appConfig=config, deviceRes=deviceRes, log=log)
+        self.image_view = ImageViewer(appConfig=config, deviceRes=deviceRes)
         self.add_widget(self.image_view)
 
     def on_enter(self):
@@ -112,7 +113,7 @@ class TimelessImageView(App):
 
 if __name__ == '__main__':
     TimelessImageView().run()
-    log.info(f'Writing Configuration into {config_filename}!')
+    Logger.info(f'Writing Configuration into {config_filename}!')
     if "Retina" in resStr:
         # iMac27in Retina and mbp16in
         # for some reason you have to divide window width/height by two, but not the location
