@@ -152,7 +152,10 @@ class ImageViewer(FloatLayout):
         if os.path.exists(f"{destDir}/{img['image']}"):
             Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
         else:
-            Logger.info(f"Moving img={img['image']} to destDir={destDir}")
+            if "Trash" in destDir:
+                Logger.info(f"DELETE img={img['image']} to destDir={destDir}")
+            else:
+                Logger.info(f"Move img={img['image']} to destDir={destDir}")
             shutil.move(img['image'], destDir)
             self.imageSet['orderedList'].remove(img)
             self.change_to_image(self.imageSet['setPos'])
