@@ -6,6 +6,7 @@ import reusables
 import shutil
 import time;
 
+from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
@@ -90,6 +91,12 @@ class ImageViewer(FloatLayout):
         self.winTop = None
         self.winLeft = None
 
+        # user feedback font settings
+        self.user_feedback_font_size = 32
+        self.user_feedback_fg = (0.85, 0.85, 0.85, 0.8)
+        self.user_feedback_bg = (0.05, 0.05, 0.05, 0.7)
+        self.user_feedback_font_size = 50
+
         # now that image loaded, also load cached next
         try:
             self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image'])
@@ -97,6 +104,18 @@ class ImageViewer(FloatLayout):
         except:
             # i guess we only had 1 image?
             pass
+
+        # a place to put messages
+        self.info_button = Button(text='timeless image viewer',
+                                  font_size = self.user_feedback_font_size,
+                                  size_hint=(1, .1),
+                                  pos_hint={'x':0, 'y':.1},
+                                  color = self.user_feedback_fg,
+                                  background_color = self.user_feedback_bg
+                                  )
+        self.add_widget(self.info_button)
+        # it takes a while to actually draw this so think of it as 3s not 4s
+        Clock.schedule_once(self.user_feedback_clear, 4)
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -146,10 +165,23 @@ class ImageViewer(FloatLayout):
         self.sv.width = size[0]
         self.sv.height = size[1]
 
+    def user_feedback(self, text, clearTime=2):
+        self.info_button.text = text
+        self.info_button.color = self.user_feedback_fg
+        self.info_button.background_color = self.user_feedback_bg
+        Clock.unschedule(self.user_feedback_clear, all=True)
+        Clock.schedule_once(self.user_feedback_clear, clearTime)
+
+    def user_feedback_clear(self, dt):
+        self.info_button.text = ''
+        self.info_button.color=(0,0,0,0)
+        self.info_button.background_color=(0,0,0,0)
+
     # move or delete image
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         if os.path.exists(f"{destDir}/{img['image']}"):
+            self.user_feedback(f" ! img={destDir + '/' + img['image']} exists, not moving.")
             Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
         else:
             if "Trash" in destDir:
@@ -159,15 +191,18 @@ class ImageViewer(FloatLayout):
             shutil.move(img['image'], destDir)
             self.imageSet['orderedList'].remove(img)
             self.change_to_image(self.imageSet['setPos'])
+            self.user_feedback(f" -> MOVED to destDir={destDir}")
 
     # copy an image elsewhere
     def copy_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         if os.path.exists(f"{destDir}/{img['image']}"):
             Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
+            self.user_feedback(f" ! img={destDir + '/' + img['image']} exists, not copying.")
         else:
             Logger.info(f"Copy img={img['image']} to destDir={destDir}")
             shutil.copy(img['image'], destDir)
+            self.user_feedback(f" >> COPIED to destDir={destDir}")
 
     def reset_scrollpos(self):
         self.sv.scroll_x = 0
@@ -244,6 +279,7 @@ class ImageViewer(FloatLayout):
                 Logger.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
                 self.currKey = keycode[1]
             elif (keycode[1] in doubleKeycodes):
+                self.user_feedback(f"About to {keycode[1]}!", 1)
                 Logger.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
                 self.lastScaryTimestamp = currTs
                 self.previousKey = keycode[1]
@@ -266,13 +302,15 @@ class ImageViewer(FloatLayout):
                     self.move_image(os.path.expanduser(fileDest))
                 except:
                     Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+                    self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
             elif (self.previousKey == 'c'):
-                # move the item somewhere
+                # copy the item somewhere
                 try:
                     fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
                     self.copy_image(os.path.expanduser(fileDest))
                 except:
                     Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+                    self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
             elif self.currKey == 'q' and self.previousKey == 'q':
                 # shut it down
                 Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
@@ -307,6 +345,7 @@ class ImageViewer(FloatLayout):
             # pull one random image, then schedule more on interval
             self.image.next_image('random')
             self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, self.slideshowInterval)
+            self.user_feedback(f"Starting slideshow with interval of {self.slideshowInterval} seconds.", 2)
         # IMAGE CHANGING -----
         elif keycode[1] == 'pagedown':
             self.image.next_image('ordered')
