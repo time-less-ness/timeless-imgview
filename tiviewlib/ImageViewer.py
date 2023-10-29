@@ -92,10 +92,14 @@ class ImageViewer(FloatLayout):
         self.winLeft = None
 
         # user feedback font settings
-        self.user_feedback_font_size = 32
-        self.user_feedback_fg = (0.85, 0.85, 0.85, 0.8)
-        self.user_feedback_bg = (0.05, 0.05, 0.05, 0.7)
-        self.user_feedback_font_size = 50
+        try:
+            self.user_feedback_font_size = int(self.appConfig.get("UI", "feedback-fontsize"))
+            self.user_feedback_fg = [float(i) for i in self.appConfig.get("UI", "feedback-fg").split(",")]
+            self.user_feedback_bg = [float(i) for i in self.appConfig.get("UI", "feedback-bg").split(",")]
+        except:
+            self.user_feedback_font_size = 28
+            self.user_feedback_fg = (0.95, 0.95, 0.95, 0.8)
+            self.user_feedback_bg = (0.05, 0.05, 0.05, 0.8)
 
         # now that image loaded, also load cached next
         try:
@@ -107,15 +111,16 @@ class ImageViewer(FloatLayout):
 
         # a place to put messages
         self.info_button = Button(text='timeless image viewer',
+                                  font_name = "Times New Roman",
                                   font_size = self.user_feedback_font_size,
-                                  size_hint=(1, .1),
+                                  size_hint=(1.0, 0.075),
                                   pos_hint={'x':0, 'y':.1},
                                   color = self.user_feedback_fg,
                                   background_color = self.user_feedback_bg
                                   )
         self.add_widget(self.info_button)
-        # it takes a while to actually draw this so think of it as 3s not 4s
-        Clock.schedule_once(self.user_feedback_clear, 4)
+        # it takes a while to actually draw this so think of it as 1s not 2s
+        Clock.schedule_once(self.user_feedback_clear, 2)
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -186,12 +191,13 @@ class ImageViewer(FloatLayout):
         else:
             if "Trash" in destDir:
                 Logger.info(f"DELETE img={img['image']} to destDir={destDir}")
+                self.user_feedback(f" x> TRASHED")
             else:
                 Logger.info(f"Move img={img['image']} to destDir={destDir}")
+                self.user_feedback(f" -> MOVED to {destDir}")
             shutil.move(img['image'], destDir)
             self.imageSet['orderedList'].remove(img)
             self.change_to_image(self.imageSet['setPos'])
-            self.user_feedback(f" -> MOVED to destDir={destDir}")
 
     # copy an image elsewhere
     def copy_image(self, destDir):
@@ -269,7 +275,7 @@ class ImageViewer(FloatLayout):
         Window.show_cursor = False
 
         # list of potential doublekeys
-        doubleKeycodes = ['c', 'q', 'm', 'delete']
+        doubleKeycodes = {'c': "Copy File", 'q': "Quit Viewer", 'm': "Move File", 'delete': "Trash File"}
 
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) or (keycode[0] >= 48 and keycode[0] <= 57) or (keycode[1] in ['delete']):
@@ -278,9 +284,9 @@ class ImageViewer(FloatLayout):
             if currTs - self.lastScaryTimestamp < 1:
                 Logger.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
                 self.currKey = keycode[1]
-            elif (keycode[1] in doubleKeycodes):
-                self.user_feedback(f"About to {keycode[1]}!", 1)
-                Logger.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
+            elif (keycode[1] in doubleKeycodes.keys()):
+                self.user_feedback(f"About to {doubleKeycodes[keycode[1]]}?", 1)
+                Logger.debug(f"Scary Action Soon? - {doubleKeycodes[keycode[1]]}")
                 self.lastScaryTimestamp = currTs
                 self.previousKey = keycode[1]
                 self.currKey = ''
@@ -294,7 +300,7 @@ class ImageViewer(FloatLayout):
             self.lastScaryTimestamp = 0
 
         # KEY COMBO ITEMS ----
-        if (self.currKey != '' and self.previousKey in doubleKeycodes):
+        if (self.currKey != '' and self.previousKey in doubleKeycodes.keys()):
             if (self.previousKey == 'm'):
                 # move the item somewhere
                 try:
