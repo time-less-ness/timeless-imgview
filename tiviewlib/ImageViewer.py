@@ -160,6 +160,15 @@ class ImageViewer(FloatLayout):
             self.imageSet['orderedList'].remove(img)
             self.change_to_image(self.imageSet['setPos'])
 
+    # copy an image elsewhere
+    def copy_image(self, destDir):
+        img = self.imageSet['orderedList'][self.imageSet['setPos']]
+        if os.path.exists(f"{destDir}/{img['image']}"):
+            Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
+        else:
+            Logger.info(f"Copy img={img['image']} to destDir={destDir}")
+            shutil.copy(img['image'], destDir)
+
     def reset_scrollpos(self):
         self.sv.scroll_x = 0
         self.sv.scroll_y = 0
@@ -224,6 +233,9 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
+        # list of potential doublekeys
+        doubleKeycodes = ['c', 'q', 'm', 'delete']
+
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) or (keycode[0] >= 48 and keycode[0] <= 57) or (keycode[1] in ['delete']):
             # is this a potential double-key combo?
@@ -231,7 +243,7 @@ class ImageViewer(FloatLayout):
             if currTs - self.lastScaryTimestamp < 1:
                 Logger.debug(f"Scary Action Enacted! - previousKey={self.previousKey}")
                 self.currKey = keycode[1]
-            elif (keycode[1] in ['q', 'm', 'delete']):
+            elif (keycode[1] in doubleKeycodes):
                 Logger.debug(f"Scary Action Soon? - keycode1={keycode[1]}")
                 self.lastScaryTimestamp = currTs
                 self.previousKey = keycode[1]
@@ -246,13 +258,27 @@ class ImageViewer(FloatLayout):
             self.lastScaryTimestamp = 0
 
         # KEY COMBO ITEMS ----
-        if (self.currKey != '' and self.previousKey == 'm'):
-            # move the item somewhere
-            try:
-                fileDest = self.appConfig.get("ReadOnlySettings", f"movedest-{self.currKey}")
-                self.move_image(os.path.expanduser(fileDest))
-            except:
-                Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+        if (self.currKey != '' and self.previousKey in doubleKeycodes):
+            if (self.previousKey == 'm'):
+                # move the item somewhere
+                try:
+                    fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
+                    self.move_image(os.path.expanduser(fileDest))
+                except:
+                    Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+            elif (self.previousKey == 'c'):
+                # move the item somewhere
+                try:
+                    fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
+                    self.copy_image(os.path.expanduser(fileDest))
+                except:
+                    Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+            elif self.currKey == 'q' and self.previousKey == 'q':
+                # shut it down
+                Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
+                App.get_running_app().stop()
+            elif self.currKey == 'delete' and self.previousKey == 'delete':
+                self.move_image(self.imageSet['del_dir'])
 
             self.previousKey = ''
             self.currKey = ''
@@ -371,12 +397,6 @@ class ImageViewer(FloatLayout):
             self.image.be_zoom_fit()
             self.sv.scroll_x = 0.5
             self.sv.scroll_y = 0.5
-        # IMAGE COPY/MOVE/DELETE -----
-        elif self.currKey == 'delete' and self.previousKey == 'delete':
-            self.move_image(self.imageSet['del_dir'])
-        elif text == 'c' and 'control' in modifiers:
-            # TODO
-            Logger.debug(f"Copy image")
         # WINDOW MANIPULATIONS ----
         elif text == 'f':
             if self.fullscreen_mode == False:
@@ -394,10 +414,5 @@ class ImageViewer(FloatLayout):
                 Window.size = self.unmaxSize
                 Window.top = self.winTop
                 Window.left = self.winLeft
-        # QUIT ----
-        elif self.currKey == 'q' and self.previousKey == 'q':
-            # shut it down
-            Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
-            App.get_running_app().stop()
 
         return True

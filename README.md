@@ -18,7 +18,7 @@ This one works for me.
 The brew command is needed for Mac. I believe most Linux can just do the python3 portion.
 ```
 # mac only
-brew install python@3.7
+brew install python@3.11
 
 # mac/linux both
 python3 -m pip install reusables kivy
@@ -37,11 +37,14 @@ Now you can run it. You must pass it at least one argument, eg a directory with 
 Some ways you might want to invoke this:
 
 ```
-# view all images in imageDir/
-timeless_imgview.py imageDir/
+# view all images in current directory (but not subdirectories)
+timeless_imgview.py .
 
-# view all images in all subdirectories
+# view all images in all subdirectories (but not current directory)
 timeless_imgview.py */
+
+# view all images in /path/to/imageDir/
+timeless_imgview.py /path/to/imageDir/
 
 # view only JPGs in all subdirectories
 timeless_imgview.py */*.jpg
@@ -75,10 +78,11 @@ When in the app, you may navigate images like so:
  * `3` - view image triple size
  * `del-del` - pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder
  * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W)
+ * `ma` - Move to location `a` defined in config, case insensitive, and can define 25 other locations attached to letters `b-z`
 
 # Image Support
-This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it does
-not handle WEBM or JPG2000.
+This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it cannot
+handle WEBM or JPG2000.
 
 # FAQ
 **Q** It stopped working! Help?
