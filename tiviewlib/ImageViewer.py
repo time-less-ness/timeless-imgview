@@ -119,8 +119,7 @@ class ImageViewer(FloatLayout):
                                   background_color = self.user_feedback_bg
                                   )
         self.add_widget(self.info_button)
-        # it takes a while to actually draw this so think of it as 1s not 2s
-        Clock.schedule_once(self.user_feedback_clear, 2)
+        Clock.schedule_once(self.user_feedback_clear, 1)
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
