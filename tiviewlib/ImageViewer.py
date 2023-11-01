@@ -119,8 +119,7 @@ class ImageViewer(FloatLayout):
                                   background_color = self.user_feedback_bg
                                   )
         self.add_widget(self.info_button)
-        # it takes a while to actually draw this so think of it as 1s not 2s
-        Clock.schedule_once(self.user_feedback_clear, 2)
+        Clock.schedule_once(self.user_feedback_clear, 1)
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -348,10 +347,15 @@ class ImageViewer(FloatLayout):
                 self.scrollEvent = Clock.schedule_interval(self.keep_on_scrollin, self.scrollScheduleInterval)
         # SLIDESHOW -----
         elif text == 's':
+            if "shift" in modifiers:
+                schedTiming = int(self.slideshowInterval / 2)
+            else:
+                schedTiming = int(self.slideshowInterval)
+
             # pull one random image, then schedule more on interval
             self.image.next_image('random')
-            self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, self.slideshowInterval)
-            self.user_feedback(f"Starting slideshow with interval of {self.slideshowInterval} seconds.", 2)
+            self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, schedTiming)
+            self.user_feedback(f"Starting slideshow with interval of {schedTiming} seconds.", 2)
         # IMAGE CHANGING -----
         elif keycode[1] == 'pagedown':
             self.image.next_image('ordered')
