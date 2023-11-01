@@ -90,4 +90,3 @@ handle WEBM or JPG2000.
 **A** Yeah, Homebrew keeps breaking my Python whenever I upgrade or install something else. Go
 through the installation instructions again. If you know how to fix this, submit a PR. I think
 Linux has this problem less often.
-
