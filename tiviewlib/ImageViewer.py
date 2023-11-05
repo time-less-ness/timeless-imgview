@@ -353,9 +353,9 @@ class ImageViewer(FloatLayout):
         elif text == 's':
             if self.slideshowEvent:
                 if "shift" in modifiers:
-                    self.slideshowInterval = max(self.slideshowInterval / 2, 1)
-                else:
                     self.slideshowInterval = min(self.slideshowInterval * 2, 120)
+                else:
+                    self.slideshowInterval = max(self.slideshowInterval / 2, 1)
 
             schedTiming = int(self.slideshowInterval)
 
