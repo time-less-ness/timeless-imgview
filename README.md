@@ -67,18 +67,17 @@ timeless_imgview.py $( ls -al Montages/*.jpg | awk '{print $5" "$9}' | sort -n |
 When in the app, you may navigate images like so:
 
  * `arrow keys` - scroll around the image if larger than fit to screen
- * `; '` - left/right one image (hold shift for 10, Ctrl for 50 images)
- * `, .` - randomise images and go through them left/right
- * `- =` - zoom out/in to the image
- * `z` - show image 1:1 pixel-wise
- * `x` - fit the image to your screen
- * `s` - begin a slideshow, showing a new image every few seconds
- * `f` - fullscreen mode (this is buggy in Mac and Linux, be prepared for program to fail)
- * `2` - view image double size
- * `3` - view image triple size
- * `del-del` - pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder
- * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W)
- * `ma` - Move to location `a` defined in config, case insensitive, and can define 25 other locations attached to letters `b-z`
+ * `; '` - Left/right one image (hold shift for 10, Ctrl for 50 images).
+ * `, .` - Randomise images and go through them left/right.
+ * `- =` - Zoom out/in to the image.
+ * `z` - Show image 1:1 pixel-wise.
+ * `x` - Fit the image to your screen.
+ * `s` - Begin a slideshow, showing a new image every 40s, shift-S for 20s.
+ * `f` - Fullscreen mode (this is buggy).
+ * `2`, `3`, `4` - View image double, triple, quadruple size.
+ * `del-del` - Pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder.
+ * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W).
+ * `ma` - Move to location `a` defined in config, case insensitive. Can define 25 other locations attached to letters `b-z`.
 
 # Image Support
 This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it cannot

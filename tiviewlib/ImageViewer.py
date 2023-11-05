@@ -78,7 +78,7 @@ class ImageViewer(FloatLayout):
 
         # slideshow event
         self.slideshowEvent = None
-        self.slideshowInterval = 40
+        self.slideshowInterval = 20
 
         # for scary actions, you double-tap the command,
         # such as Q/Esc to quit, or Del to delete, or m+X to move
@@ -265,10 +265,6 @@ class ImageViewer(FloatLayout):
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
         #Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
-        # all keyboard events cancel the slideshow
-        if self.slideshowEvent:
-            Clock.unschedule(self.slideshowEvent, all=True)
-            self.slideshowEvent = None
 
         # keyboard events hide the cursor
         Window.show_cursor = False
@@ -277,7 +273,15 @@ class ImageViewer(FloatLayout):
         doubleKeycodes = {'c': "Copy File", 'q': "Quit Viewer", 'm': "Move File", 'delete': "Trash File"}
 
         # is this an initial press after some delay, or a quick successor?
-        if (keycode[0] >= 97 and keycode[0] <= 122) or (keycode[0] >= 48 and keycode[0] <= 57) or (keycode[1] in ['delete']):
+        if (keycode[0] >= 97 and keycode[0] <= 122) \
+        or (keycode[0] >= 48 and keycode[0] <= 57) \
+        or (keycode[1] in ['delete']) \
+        or (keycode[1] in '!@#$%^&*()_+-=\{\}[]:;<>?,./"\''):
+            # all keyboard events except S itself cancel the slideshow
+            if self.slideshowEvent and text != 's':
+                Clock.unschedule(self.slideshowEvent, all=True)
+                self.slideshowEvent = None
+
             # is this a potential double-key combo?
             currTs = time.time()
             if currTs - self.lastScaryTimestamp < 1:
@@ -347,15 +351,24 @@ class ImageViewer(FloatLayout):
                 self.scrollEvent = Clock.schedule_interval(self.keep_on_scrollin, self.scrollScheduleInterval)
         # SLIDESHOW -----
         elif text == 's':
-            if "shift" in modifiers:
-                schedTiming = int(self.slideshowInterval / 2)
-            else:
-                schedTiming = int(self.slideshowInterval)
+            if self.slideshowEvent:
+                if "shift" in modifiers:
+                    self.slideshowInterval = max(self.slideshowInterval / 2, 1)
+                else:
+                    self.slideshowInterval = min(self.slideshowInterval * 2, 120)
 
-            # pull one random image, then schedule more on interval
-            self.image.next_image('random')
-            self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, schedTiming)
-            self.user_feedback(f"Starting slideshow with interval of {schedTiming} seconds.", 2)
+            schedTiming = int(self.slideshowInterval)
+
+            # if starting slideshow, pull one random image, then schedule more on interval
+            if not self.slideshowEvent:
+                self.image.next_image('random')
+                self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, schedTiming)
+                self.user_feedback(f"Slideshow started with interval {schedTiming} seconds. Shift-S and s change interval.", 2)
+            else:
+                Clock.unschedule(self.slideshowEvent, all=True)
+                self.slideshowEvent = None
+                self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, schedTiming)
+                self.user_feedback(f"New slideshow interval {schedTiming} seconds. Shift-S and s change interval.", 2)
         # IMAGE CHANGING -----
         elif keycode[1] == 'pagedown':
             self.image.next_image('ordered')
