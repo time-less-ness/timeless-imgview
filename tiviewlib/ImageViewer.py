@@ -304,22 +304,15 @@ class ImageViewer(FloatLayout):
 
         # KEY COMBO ITEMS ----
         if (self.currKey != '' and self.previousKey in doubleKeycodes.keys()):
-            if (self.previousKey == 'm'):
+            if (self.previousKey in ['m', 'c']):
                 # move the item somewhere
                 try:
                     fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
-                    self.move_image(os.path.expanduser(fileDest))
+                    self.move_image(os.path.expanduser(fileDest)) if self.previousKey == 'm' else self.copy_image(os.path.expanduser(fileDest))
                 except:
-                    Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
+                    Logger.info(f"Location with no keybinding={self.currKey} in config file!")
                     self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
-            elif (self.previousKey == 'c'):
-                # copy the item somewhere
-                try:
-                    fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
-                    self.copy_image(os.path.expanduser(fileDest))
-                except:
-                    Logger.info(f"Tried to move to location with no keybinding={self.currKey}")
-                    self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
+
             elif self.currKey == 'q' and self.previousKey == 'q':
                 # shut it down
                 Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
