@@ -124,11 +124,16 @@ class ImageViewer(FloatLayout):
     def _get_images(self):
         self.imageSet['orderedList'] = []
 
+        # if no args passed in at all, use current directory as location for images
+        if sys.argv[1:] == []:
+            sys.argv[1:] = ['.']
+
         # might get a file or dir as argv
         toSort = False
+        
         for inArg in sys.argv[1:]:
-            toSort = True
             if os.path.isdir(inArg):
+                toSort = True
                 dirName = inArg
                 # append a / for dirName
                 if dirName[-1] != '/':
