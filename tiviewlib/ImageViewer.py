@@ -113,8 +113,8 @@ class ImageViewer(FloatLayout):
         self.info_button = Button(text='timeless image viewer',
                                   font_name = "Times New Roman",
                                   font_size = self.user_feedback_font_size,
-                                  size_hint=(1.0, 0.075),
-                                  pos_hint={'x':0, 'y':.1},
+                                  size_hint=(1.0, 0.055),
+                                  pos_hint={'x':0, 'y':.03},
                                   color = self.user_feedback_fg,
                                   background_color = self.user_feedback_bg
                                   )
