@@ -50,6 +50,7 @@ if config.read(config_filename) == []:
     f.write("feedback-fg = 0.85,0.85,0.85,0.8\n")
     f.write("feedback-bg = 0.05,0.05,0.05,0.7\n")
     f.write("feedback-fontsize = 32\n")
+    f.write("slideshow-interval = 20\n")
     f.write("\n")
     f.write("[LastRun]\n")
     f.write("lastgeom = 1920x1080+0,0\n")
@@ -125,9 +126,11 @@ if __name__ == '__main__':
     else:
         output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
     # re-read in case another version overwrote
+    slideshowInterval = config.get("UI", "slideshow-interval")
     config.read(config_filename)
     config.set('LastRun', f'{os.getcwd()}--geom', output_geom)
-    config.set('LastRun', f'lastgeom', output_geom)
+    config.set('LastRun', 'lastgeom', output_geom)
+    config.set('UI', 'slideshow-interval', slideshowInterval)
     with open(config_filename, 'w') as configfile:
         config.write(configfile)
 

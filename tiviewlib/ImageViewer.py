@@ -78,7 +78,10 @@ class ImageViewer(FloatLayout):
 
         # slideshow event
         self.slideshowEvent = None
-        self.slideshowInterval = 20
+        try:
+            self.slideshowInterval = int(self.appConfig.get("UI", "slideshow-interval"))
+        except:
+            self.slideshowInterval = 20
 
         # for scary actions, you double-tap the command,
         # such as Q/Esc to quit, or Del to delete, or m+X to move
@@ -355,6 +358,7 @@ class ImageViewer(FloatLayout):
                 else:
                     self.slideshowInterval = max(math.floor(self.slideshowInterval * 0.75), 1)
 
+            self.appConfig.set("UI", "slideshow-interval", str(self.slideshowInterval))
             schedTiming = int(self.slideshowInterval)
 
             # if starting slideshow, pull one random image, then schedule more on interval
