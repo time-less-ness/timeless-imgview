@@ -278,12 +278,11 @@ class ImageViewer(FloatLayout):
         Window.show_cursor = False
 
         # list of potential doublekeys
-        doubleKeycodes = {'c': "Copy File", 'q': "Quit Viewer", 'm': "Move File", 'delete': "Trash File"}
+        doubleKeycodes = {'c': "Copy File", 'q': "Quit Viewer", 'm': "Move File"}
 
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) \
         or (keycode[0] >= 48 and keycode[0] <= 57) \
-        or (keycode[1] in ['delete']) \
         or (keycode[1] in '!@#$%^&*()_+-=\{\}[]:;<>?,./"\''):
             # all keyboard events except S itself cancel the slideshow
             if self.slideshowEvent and text != 's':
@@ -325,14 +324,15 @@ class ImageViewer(FloatLayout):
                 # shut it down
                 Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
                 App.get_running_app().stop()
-            elif self.currKey == 'delete' and self.previousKey == 'delete':
-                self.move_image(self.imageSet['del_dir'])
 
             self.previousKey = ''
             self.currKey = ''
             self.lastScaryTimestamp = 0
             return True
 
+        # DELETION ----
+        if keycode[1] == 'delete':
+            self.move_image(self.imageSet['del_dir'])
         # PANNING ----
         if keycode[1] == 'up':
             self.scrollAmount = self.calc_scroll_amt(0, modifiers)
