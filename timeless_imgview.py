@@ -14,6 +14,10 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.utils import platform
 from tiviewlib.ImageViewer import ImageViewer
+from kivy.config import Config
+
+# stop the annoying red dot on right-click
+Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
 #Logger.setLevel(LOG_LEVELS["debug"])
 Logger.setLevel(LOG_LEVELS["info"])
