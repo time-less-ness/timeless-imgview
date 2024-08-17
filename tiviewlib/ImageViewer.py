@@ -271,7 +271,7 @@ class ImageViewer(FloatLayout):
         self.image.next_image('random')
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
-        #Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
+        Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
 
         # keyboard events hide the cursor
         Window.show_cursor = False
@@ -326,6 +326,8 @@ class ImageViewer(FloatLayout):
 
         # DELETION ----
         if keycode[1] == 'delete':
+            self.move_image(self.imageSet['del_dir'])
+        if keycode[1] == 'backspace' and 'meta' in modifiers:
             self.move_image(self.imageSet['del_dir'])
         # PANNING ----
         if keycode[1] == 'up':
