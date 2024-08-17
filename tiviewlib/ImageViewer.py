@@ -83,8 +83,7 @@ class ImageViewer(FloatLayout):
         except:
             self.slideshowInterval = 20
 
-        # for scary actions, you double-tap the command,
-        # such as Q/Esc to quit, or Del to delete, or m+X to move
+        # for scary actions multi-key commands
         self.lastScaryTimestamp = 0
         self.previousKey = ''
         self.currKey = ''
@@ -198,7 +197,7 @@ class ImageViewer(FloatLayout):
         else:
             if "Trash" in destDir:
                 Logger.info(f"DELETE img={img['image']} to destDir={destDir}")
-                self.user_feedback(f" x> TRASHED")
+                self.user_feedback(f" x> TRASHED into {destDir}")
             else:
                 Logger.info(f"Move img={img['image']} to destDir={destDir}")
                 self.user_feedback(f" -> MOVED to {destDir}")
@@ -278,7 +277,7 @@ class ImageViewer(FloatLayout):
         Window.show_cursor = False
 
         # list of potential doublekeys
-        doubleKeycodes = {'c': "Copy File", 'q': "Quit Viewer", 'm': "Move File"}
+        doubleKeycodes = {'c': "Copy File", 'm': "Move File"}
 
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) \
@@ -319,11 +318,6 @@ class ImageViewer(FloatLayout):
                 except:
                     Logger.info(f"Location with no keybinding={self.currKey} in config file!")
                     self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
-
-            elif self.currKey == 'q' and self.previousKey == 'q':
-                # shut it down
-                Logger.debug(f"Qx2, quitting! - currKey={self.currKey}, previousKey={self.previousKey}")
-                App.get_running_app().stop()
 
             self.previousKey = ''
             self.currKey = ''
