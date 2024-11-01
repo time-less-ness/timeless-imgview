@@ -277,7 +277,7 @@ class ImageViewer(FloatLayout):
         Window.show_cursor = False
 
         # list of potential doublekeys
-        doubleKeycodes = {'c': "Copy File", 'm': "Move File"}
+        doubleKeycodes = {'c': "Copy File", 'm': "Move File", 'q': "Quit Viewer"}
 
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) \
@@ -318,6 +318,9 @@ class ImageViewer(FloatLayout):
                 except:
                     Logger.info(f"Location with no keybinding={self.currKey} in config file!")
                     self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
+
+            if (self.previousKey == 'q' and self.currKey == 'q'):
+                App.get_running_app().stop()
 
             self.previousKey = ''
             self.currKey = ''
