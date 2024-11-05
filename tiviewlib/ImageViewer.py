@@ -123,6 +123,18 @@ class ImageViewer(FloatLayout):
         self.add_widget(self.info_button)
         Clock.schedule_once(self.user_feedback_clear, 1)
 
+        # more massive messages can go here, for eg move-to locations
+        self.giant_info_button = Button(text='lots of info would go here',
+                                  font_name = "Times New Roman",
+                                  font_size = self.user_feedback_font_size,
+                                  size_hint=(1.0, 0.75),
+                                  pos_hint={'x':0, 'y':.25},
+                                  color = self.user_feedback_fg,
+                                  background_color = self.user_feedback_bg
+                                  )
+        self.add_widget(self.giant_info_button)
+        Clock.schedule_once(self.giant_info_clear, 1)
+
     def _get_images(self):
         self.imageSet['orderedList'] = []
 
@@ -187,6 +199,18 @@ class ImageViewer(FloatLayout):
         self.info_button.text = ''
         self.info_button.color=(0,0,0,0)
         self.info_button.background_color=(0,0,0,0)
+
+    def giant_info(self, text, clearTime=2):
+        self.giant_info_button.text = text
+        self.giant_info_button.color = self.user_feedback_fg
+        self.giant_info_button.background_color = self.user_feedback_bg
+        Clock.unschedule(self.giant_info_clear, all=True)
+        Clock.schedule_once(self.giant_info_clear, clearTime)
+
+    def giant_info_clear(self, dt):
+        self.giant_info_button.text = ''
+        self.giant_info_button.color=(0,0,0,0)
+        self.giant_info_button.background_color=(0,0,0,0)
 
     # move or delete image
     def move_image(self, destDir):
@@ -299,6 +323,11 @@ class ImageViewer(FloatLayout):
                 self.lastScaryTimestamp = currTs
                 self.previousKey = keycode[1]
                 self.currKey = ''
+
+                # if moving/copying show destinations
+                if keycode[1] in ("c","m"):
+                    section_data = '\n'.join(f"{key}: {value}" for key, value in dict(self.appConfig["ReadOnlySettings"]).items())
+                    self.giant_info(f"Copying/Moving Destinations:\n\n{section_data}", 2)
             else:
                 self.previousKey = ''
                 self.currKey = ''
@@ -315,6 +344,7 @@ class ImageViewer(FloatLayout):
                 try:
                     fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
                     self.move_image(os.path.expanduser(fileDest)) if self.previousKey == 'm' else self.copy_image(os.path.expanduser(fileDest))
+                    Clock.schedule_once(self.giant_info_clear, 0.1)
                 except:
                     Logger.info(f"Location with no keybinding={self.currKey} in config file!")
                     self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
