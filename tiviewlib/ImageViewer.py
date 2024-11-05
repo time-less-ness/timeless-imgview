@@ -128,7 +128,7 @@ class ImageViewer(FloatLayout):
                                   font_name = "Times New Roman",
                                   font_size = self.user_feedback_font_size,
                                   size_hint=(1.0, 0.75),
-                                  pos_hint={'x':0, 'y':.25},
+                                  pos_hint={'x':0, 'y':.15},
                                   color = self.user_feedback_fg,
                                   background_color = self.user_feedback_bg
                                   )
