@@ -50,12 +50,20 @@ class MainImage(Image):
         if changeType != self.imageSet['changeType']:
             Logger.debug(f"Flipping from {self.imageSet['changeType']} to {changeType}")
             tmpImg = self.imageSet['orderedList'][self.imageSet['setPos']]
-            if self.imageSet['changeType'] == 'random':
+            if changeType == 'ordered':
+                Logger.debug("Ordering!")
                 self.imageSet['orderedList'].sort(key=lambda x: x['image'])
-                self.imageSet['changeType'] = 'ordered'
+            elif changeType == 'shuffled':
+                Logger.debug("Shuffling!")
+                self.imageSet['orderedList'].sort(key=lambda x: x['image'])
+                for i in range(len(self.imageSet['orderedList']) - 20):
+                    swapIndex = random.randint(i+1, i+20)
+                    self.imageSet['orderedList'][i], self.imageSet['orderedList'][swapIndex] = self.imageSet['orderedList'][swapIndex], self.imageSet['orderedList'][i]
             else:
-                self.imageSet['orderedList'].sort(key=lambda x: random.randint(0,9999999))
-                self.imageSet['changeType'] = 'random'
+                Logger.debug("Randoming!")
+                self.imageSet['orderedList'].sort(key=lambda x: random.randint(0,999999999))
+
+            self.imageSet['changeType'] = changeType
             self.imageSet['setPos'] = self.imageSet['orderedList'].index(tmpImg)
             self.source = self.gen_image()
 

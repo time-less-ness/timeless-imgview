@@ -425,17 +425,14 @@ class ImageViewer(FloatLayout):
                 self.image.prev_image('ordered', 10)
             else:
                 self.image.prev_image('ordered')
+        elif text == "[":
+            self.image.prev_image('shuffled')
+        elif text == "]":
+            self.image.next_image('shuffled')
         elif text == ".":
             self.image.next_image('random')
         elif text == ',':
             self.image.prev_image('random')
-        # ROTATING -----
-        elif text == "[":
-            Logger.debug(f"Rotate -90")
-            self.image.rotation = -90
-        elif text == "]":
-            Logger.debug(f"Rotate +90")
-            self.image.rotation = 90
         # ZOOMING -----
         elif text in ("-", "_"):
             if 'shift' in modifiers:
