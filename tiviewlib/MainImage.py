@@ -55,7 +55,10 @@ class MainImage(Image):
                 self.imageSet['orderedList'].sort(key=lambda x: x['image'])
             elif changeType == 'shuffled':
                 Logger.debug("Shuffling!")
-                self.imageSet['orderedList'].sort(key=lambda x: x['image'])
+                # only need to order them if not already ordered
+                if self.imageSet['changeType'] != 'ordered':
+                    self.imageSet['orderedList'].sort(key=lambda x: x['image'])
+                # shuffling, not totally randomised
                 for i in range(len(self.imageSet['orderedList']) - 20):
                     swapIndex = random.randint(i+1, i+20)
                     self.imageSet['orderedList'][i], self.imageSet['orderedList'][swapIndex] = self.imageSet['orderedList'][swapIndex], self.imageSet['orderedList'][i]

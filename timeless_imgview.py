@@ -3,13 +3,11 @@
 import configparser
 #import logging
 import os
-import reusables
 import re
 import subprocess
 from kivy.app import App
 from kivy.logger import Logger, LOG_LEVELS
 from kivy.core.window import Window
-from kivy.uix.widget import Widget
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.utils import platform
