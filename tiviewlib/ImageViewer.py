@@ -292,7 +292,7 @@ class ImageViewer(FloatLayout):
             self.sv.scroll_x += self.scrollAmount[0]
 
     def slideshowNextImage(self, dx):
-        self.image.next_image('random')
+        self.image.next_image(self.image.imageSet['changeType'])
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
         Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
@@ -307,7 +307,7 @@ class ImageViewer(FloatLayout):
         if (keycode[0] >= 97 and keycode[0] <= 122) \
         or (keycode[0] >= 48 and keycode[0] <= 57) \
         or (keycode[1] in '!@#$%^&*()_+-=\{\}[]:;<>?,./"\''):
-            # all keyboard events except S itself cancel the slideshow
+            # many keyboard events cancel the slideshow
             if self.slideshowEvent and text != 's':
                 Clock.unschedule(self.slideshowEvent, all=True)
                 self.slideshowEvent = None
@@ -390,9 +390,9 @@ class ImageViewer(FloatLayout):
             self.appConfig.set("UI", "slideshow-interval", str(self.slideshowInterval))
             schedTiming = int(self.slideshowInterval)
 
-            # if starting slideshow, pull one random image, then schedule more on interval
+            # if starting slideshow, pull next image, then schedule more on interval
             if not self.slideshowEvent:
-                self.image.next_image('random')
+                self.image.next_image(self.image.imageSet['changeType'])
                 self.slideshowEvent = Clock.schedule_interval(self.slideshowNextImage, schedTiming)
                 self.user_feedback(f"Slideshow started with interval {schedTiming} seconds. Shift-S and s change interval.", 2)
             else:
