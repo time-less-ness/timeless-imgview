@@ -21,46 +21,48 @@ The brew command is needed for Mac. I believe most Linux can just do the python3
 brew install python@3.11
 
 # mac/linux both
-python3 -m pip install reusables kivy
+cd $DIR_WHERE_YOU_CHECKED_OUT_IMAGE_VIEWER
+python3 -m venv venv
+. venv/bin/activate
+pip install reusables kivy
 ```
 
 # Running
-This is a CLI-only tool. Put it in your `$PATH`. For example, I have `$HOME/bin` in my path,
-and then symlink the Python executable into that directory:
+This is a CLI-only tool. It must be run inside the Python venv you created above. The
+easiest way to do this is create an `alias` in your shell rcfile:
 
 ```
-cd $HOME/bin
-ln -s /path/to/timeless_imgview.py ./
+alias tiv='. $DIR_WHERE_YOU_CHECKED_OUT_IMAGE_VIEWER/venv/bin/activate && $DIR_WHERE_YOU_CHECKED_OUT_IMAGE_VIEWER/timeless_imgview.py'
 ```
 
-Now you can run it. You must pass it at least one argument, eg a directory with images in it.
+Now you can run it. You should pass it an argument, eg a directory with images in it.
 Some ways you might want to invoke this:
 
 ```
 # view all images in current directory (but not subdirectories)
-timeless_imgview.py .
+tiv .
 
 # view all images in all subdirectories (but not current directory)
-timeless_imgview.py */
+tiv */
 
 # view all images in /path/to/imageDir/
-timeless_imgview.py /path/to/imageDir/
+tiv /path/to/imageDir/
 
 # view only JPGs in all subdirectories
-timeless_imgview.py */*.jpg
+tiv */*.jpg
 
 # pass it images, and it will display them in the order you gave them.
-timeless_imgview.py img4 img3 img2 img1 img9 img8 img7
+tiv img4 img3 img2 img1 img9 img8 img7
 
-# all boats/snow images in all subdirectories, two different ways
-timeless_imgview.py $( ls -a1R | egrep -i 'boat|snow' )
-timeless_imgview.py $( find . -iname '*.jpg' | egrep -i 'boat|snow' )
+# view all images with filenames containing boats/snow, two methods
+tiv $( ls -a1R | egrep -i 'boats|snow' )
+tiv $( find . -iname '*.jpg' | egrep -i 'boats|snow' )
 
 # images with file size 150k or less
-timeless_imgview.py $( find . -size -150k -name '*.jpg' )
+tiv $( find . -size -150k -name '*.jpg' )
 
 # view images sorted by filesize (helps to find dups, for example)
-timeless_imgview.py $( ls -al Montages/*.jpg | awk '{print $5" "$9}' | sort -n | awk '{print $2}' )
+tiv $( ls -al Montages/*.jpg | awk '{print $5" "$9}' | sort -n | awk '{print $2}' )
 ```
 
 # Using
@@ -69,6 +71,7 @@ When in the app, you may navigate images like so:
  * `arrow keys` - scroll around the image if larger than fit to screen
  * `; '` - Left/right one image (hold shift for 10, Ctrl for 50 images).
  * `, .` - Randomise images and go through them left/right.
+ * `[ ]` - Shuffle images and go through left/right
  * `- =` - Zoom out/in to the image.
  * `z` - Show image 1:1 pixel-wise.
  * `x` - Fit the image to your screen.
@@ -88,4 +91,5 @@ handle WEBM or JPG2000.
 
 **A** Yeah, Homebrew keeps breaking my Python whenever I upgrade or install something else. Go
 through the installation instructions again. If you know how to fix this, submit a PR. I think
-Linux has this problem less often.
+Linux has this problem less often. Now that the instructions are updated to use `venv` I suspect
+this will be less of a problem.
