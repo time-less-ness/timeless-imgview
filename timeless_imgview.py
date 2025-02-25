@@ -31,7 +31,11 @@ elif platform == 'macosx':
     ps = subprocess.Popen(subProcessCmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     resStr = ps.communicate()[0].decode()
     resBits = re.findall(r'\d\d\d+', resStr)
-    deviceRes = [int(resBits[0]), int(resBits[1])]
+    if (len(resBits) == 0):
+        # for some reason sometimes I don't get a res?
+        deviceRes = [1920,1080]
+    else:
+        deviceRes = [int(resBits[0]), int(resBits[1])]
 
 Logger.debug(f"Got deviceRes={deviceRes}")
 
