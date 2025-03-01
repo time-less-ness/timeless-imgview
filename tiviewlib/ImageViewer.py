@@ -487,22 +487,22 @@ class ImageViewer(FloatLayout):
             self.image.be_zoom_fit()
             self.sv.scroll_x = 0.5
             self.sv.scroll_y = 0.5
-        # WINDOW MANIPULATIONS ----
-        elif text == 'f':
-            if self.fullscreen_mode == False:
-                self.fullscreen_mode = True
-                self.unmaxSize = Window.size
-                self.winLeft = Window.left
-                self.winTop = Window.top
-                Window.top = 0
-                Window.left = 0
-                Window.borderless = True
-                Window.maximize()
-            else:
-                self.fullscreen_mode = False
-                Window.borderless = False
-                Window.size = self.unmaxSize
-                Window.top = self.winTop
-                Window.left = self.winLeft
+        # # This shit never works and it crashes if window is already fullscreen
+        # elif text == 'f':
+        #     if self.fullscreen_mode == False:
+        #         self.fullscreen_mode = True
+        #         self.unmaxSize = Window.size
+        #         self.winLeft = Window.left
+        #         self.winTop = Window.top
+        #         Window.top = 0
+        #         Window.left = 0
+        #         Window.borderless = True
+        #         Window.maximize()
+        #     else:
+        #         self.fullscreen_mode = False
+        #         Window.borderless = False
+        #         Window.size = self.unmaxSize
+        #         Window.top = self.winTop
+        #         Window.left = self.winLeft
 
         return True
