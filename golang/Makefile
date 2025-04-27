@@ -12,8 +12,6 @@ PACKAGE_PATH=github.com/time-less-ness/timeless-imgview/golang
 # Help command
 .PHONY: help
 help:
-	@echo "Adviser CLI Build System"
-	@echo ""
 	@echo "Usage:"
 	@echo "  make build    - Build the application"
 	@echo "  make clean    - Remove build artifacts"
