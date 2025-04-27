@@ -3,7 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"image/color"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -24,10 +26,10 @@ import (
 type Config struct {
 	ReadOnlySettings map[string]string `json:"readOnlySettings"`
 	UI               struct {
-		FeedbackFg         string `json:"feedbackFg"`
-		FeedbackBg         string `json:"feedbackBg"`
-		FeedbackFontSize   int    `json:"feedbackFontSize"`
-		SlideshowInterval  int    `json:"slideshowInterval"`
+		FeedbackFg        string `json:"feedbackFg"`
+		FeedbackBg        string `json:"feedbackBg"`
+		FeedbackFontSize  int    `json:"feedbackFontSize"`
+		SlideshowInterval int    `json:"slideshowInterval"`
 	} `json:"ui"`
 	LastRun struct {
 		LastGeom string `json:"lastGeom"`
@@ -44,30 +46,30 @@ type ImageSet struct {
 
 // ImageViewer represents the main application
 type ImageViewer struct {
-	window       fyne.Window
-	imageCanvas  *canvas.Image
-	scrollView   *container.Scroll
-	infoLabel    *widget.Label
-	giantInfo    *widget.Label
-	config       *Config
-	imageSet     *ImageSet
-	
+	window      fyne.Window
+	imageCanvas *canvas.Image
+	scrollView  *container.Scroll
+	infoLabel   *widget.Label
+	giantInfo   *widget.Label
+	config      *Config
+	imageSet    *ImageSet
+
 	// Window management
-	deviceRes    []int
-	windowZoom   float64
-	imgZoom      float64
-	fullscreen   bool
-	lastSize     fyne.Size
-	lastPos      fyne.Position
-	
+	deviceRes  []int
+	windowZoom float64
+	imgZoom    float64
+	fullscreen bool
+	lastSize   fyne.Size
+	lastPos    fyne.Position
+
 	// Scrolling
 	scrollingDir [4]bool
 	scrollPix    int
-	
+
 	// Slideshow
 	slideshowActive bool
 	slideshowTimer  *time.Timer
-	
+
 	// Key tracking for multi-key commands
 	lastKeyTime time.Time
 	previousKey string
@@ -75,17 +77,22 @@ type ImageViewer struct {
 }
 
 func main() {
+	// Initialize random seed
+	rand.Seed(time.Now().UnixNano())
+
+	// Create application with proper theme
 	a := app.New()
 	w := a.NewWindow("Timeless Image Viewer")
-	
+
 	// Create the image viewer
 	viewer := NewImageViewer(w)
-	
-	// Set content and show
-	w.SetContent(viewer.scrollView)
+
+	// Ensure the window has a good size before showing
 	w.Resize(fyne.NewSize(1280, 720))
+
+	// Show the window and run the application
 	w.ShowAndRun()
-	
+
 	// Save config on exit
 	viewer.saveConfig()
 }
@@ -94,39 +101,39 @@ func main() {
 func NewImageViewer(window fyne.Window) *ImageViewer {
 	// Initialize image viewer
 	iv := &ImageViewer{
-		window:        window,
-		deviceRes:     []int{1920, 1080},
-		windowZoom:    1.0,
-		imgZoom:       1.0,
-		fullscreen:    false,
-		scrollingDir:  [4]bool{false, false, false, false},
-		scrollPix:     1,
+		window:       window,
+		deviceRes:    []int{1920, 1080},
+		windowZoom:   1.0,
+		imgZoom:      1.0,
+		fullscreen:   false,
+		scrollingDir: [4]bool{false, false, false, false},
+		scrollPix:    1,
 	}
-	
+
 	// Load config
 	iv.loadConfig()
-	
+
 	// Create UI components
 	iv.setupUI()
-	
+
 	// Set up keyboard shortcuts
 	iv.setupKeyboardShortcuts()
-	
+
 	// Get images from command line arguments
 	iv.getImages()
-	
+
 	// Load first image
 	if len(iv.imageSet.OrderedList) > 0 {
 		iv.loadImage(iv.imageSet.OrderedList[0])
 	}
-	
+
 	return iv
 }
 
 // loadConfig loads the application configuration
 func (iv *ImageViewer) loadConfig() {
 	iv.config = &Config{}
-	
+
 	// Default configuration
 	iv.config.ReadOnlySettings = map[string]string{
 		"dest-a": "~/AI-Images",
@@ -135,17 +142,17 @@ func (iv *ImageViewer) loadConfig() {
 		"dest-w": "~/Work-Photos",
 		"dest-t": "/tmp",
 	}
-	
+
 	iv.config.UI.FeedbackFg = "0.85,0.85,0.85,0.9"
 	iv.config.UI.FeedbackBg = "0.05,0.05,0.05,0.3"
 	iv.config.UI.FeedbackFontSize = 32
 	iv.config.UI.SlideshowInterval = 20
-	
+
 	iv.config.LastRun.LastGeom = "1920x1080+0,0"
-	
+
 	// Try to load from config file
 	configPath := filepath.Join(os.Getenv("HOME"), ".tiviewrc.json")
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err == nil {
 		// Config exists, load it
 		json.Unmarshal(data, iv.config)
@@ -153,7 +160,7 @@ func (iv *ImageViewer) loadConfig() {
 		// Config doesn't exist, create it
 		iv.saveConfig()
 	}
-	
+
 	// Set up the image set
 	iv.imageSet = &ImageSet{
 		DeleteDir:   filepath.Join(os.Getenv("HOME"), ".Trash"),
@@ -167,31 +174,35 @@ func (iv *ImageViewer) loadConfig() {
 func (iv *ImageViewer) saveConfig() {
 	configPath := filepath.Join(os.Getenv("HOME"), ".tiviewrc.json")
 	data, _ := json.MarshalIndent(iv.config, "", "  ")
-	ioutil.WriteFile(configPath, data, 0644)
+	os.WriteFile(configPath, data, 0644)
 }
 
 // setupUI initializes the UI components
 func (iv *ImageViewer) setupUI() {
+	// Create a placeholder image with explicit size for startup
+	placeholder := canvas.NewRectangle(color.Transparent)
+	placeholder.SetMinSize(fyne.NewSize(800, 600))
+
 	// Create image canvas
 	iv.imageCanvas = &canvas.Image{
 		FillMode: canvas.ImageFillContain,
 	}
-	
-	// Create scroll container
-	iv.scrollView = container.NewScroll(container.NewCenter(iv.imageCanvas))
-	
+
+	// Create scroll container with the placeholder initially
+	iv.scrollView = container.NewScroll(container.NewCenter(placeholder))
+
 	// Create info label
 	iv.infoLabel = widget.NewLabel("")
 	iv.infoLabel.TextStyle = fyne.TextStyle{
 		Bold: true,
 	}
-	
+
 	// Create giant info label for move destinations
 	iv.giantInfo = widget.NewLabel("")
 	iv.giantInfo.TextStyle = fyne.TextStyle{
 		Bold: true,
 	}
-	
+
 	// Create overlay for labels
 	overlay := container.NewWithoutLayout(
 		iv.scrollView,
@@ -201,10 +212,10 @@ func (iv *ImageViewer) setupUI() {
 			container.NewHBox(layout.NewSpacer(), iv.infoLabel, layout.NewSpacer()),
 		),
 	)
-	
+
 	// Set the content
 	iv.window.SetContent(overlay)
-	
+
 	// Clear initial labels
 	iv.clearInfoLabel()
 	iv.clearGiantInfo()
@@ -249,7 +260,7 @@ func (iv *ImageViewer) handleKeyDown(key *fyne.KeyEvent) {
 		// Delete image
 		iv.moveImage(iv.imageSet.DeleteDir)
 	}
-	
+
 	// Handle other keys
 	switch string(key.Name) {
 	case "s":
@@ -339,27 +350,27 @@ func (iv *ImageViewer) handleKeyDown(key *fyne.KeyEvent) {
 func (iv *ImageViewer) getImages() {
 	// Clear the image list
 	iv.imageSet.OrderedList = []string{}
-	
+
 	// Get image paths
 	args := os.Args[1:]
 	if len(args) == 0 {
 		args = []string{"."}
 	}
-	
+
 	for _, arg := range args {
 		info, err := os.Stat(arg)
 		if err != nil {
 			continue
 		}
-		
+
 		if info.IsDir() {
 			// Add images from directory
-			files, _ := ioutil.ReadDir(arg)
+			files, _ := os.ReadDir(arg)
 			for _, file := range files {
-				if !file.IsDir() {
+				if fileInfo, err := file.Info(); err == nil && !fileInfo.IsDir() {
 					name := strings.ToLower(file.Name())
-					if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") || 
-					   strings.HasSuffix(name, ".png") {
+					if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") ||
+						strings.HasSuffix(name, ".png") {
 						iv.imageSet.OrderedList = append(iv.imageSet.OrderedList, filepath.Join(arg, file.Name()))
 					}
 				}
@@ -367,22 +378,70 @@ func (iv *ImageViewer) getImages() {
 		} else {
 			// Add single file
 			name := strings.ToLower(arg)
-			if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") || 
-			   strings.HasSuffix(name, ".png") {
+			if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") ||
+				strings.HasSuffix(name, ".png") {
 				iv.imageSet.OrderedList = append(iv.imageSet.OrderedList, arg)
 			}
 		}
 	}
-	
+
 	// Sort the list
 	sort.Strings(iv.imageSet.OrderedList)
 }
 
 // loadImage loads an image from a file path
 func (iv *ImageViewer) loadImage(path string) {
-	iv.imageCanvas.File = path
-	iv.imageCanvas.Refresh()
+	// Debug info
+	fmt.Printf("Loading image: %s\n", path)
+
+	// Verify the file exists
+	_, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("Error checking file: %v\n", err)
+		iv.showInfo(fmt.Sprintf("Error: %v", err))
+		return
+	}
+
+	// Ensure URI format for Fyne storage
+	uri := storage.NewFileURI(path)
+
+	// Create new resource
+	read, err := storage.OpenFileFromURI(uri)
+	if err != nil {
+		fmt.Printf("Error opening file: %v\n", err)
+		iv.showInfo(fmt.Sprintf("Error opening file: %v", err))
+		return
+	}
+	defer read.Close()
+
+	// Read all data
+	data, err := io.ReadAll(read)
+	if err != nil {
+		fmt.Printf("Error reading file data: %v\n", err)
+		iv.showInfo(fmt.Sprintf("Error reading file data: %v", err))
+		return
+	}
+
+	// Create static resource
+	res := fyne.NewStaticResource(filepath.Base(path), data)
+
+	// Create image from resource
+	img := canvas.NewImageFromResource(res)
+	img.FillMode = canvas.ImageFillContain
+	img.ScaleMode = canvas.ImageScaleSmooth
+
+	// Replace the image in the UI
+	iv.imageCanvas = img
+	iv.scrollView.Content = container.NewCenter(iv.imageCanvas)
+
+	// Force refresh everything
+	iv.scrollView.Refresh()
+	currentSize := iv.window.Content().Size()
+	iv.window.Resize(currentSize)
 	iv.window.SetTitle(fmt.Sprintf("Timeless Image Viewer - %s", filepath.Base(path)))
+
+	// Debug confirmation
+	fmt.Printf("Image loaded successfully: %s\n", filepath.Base(path))
 }
 
 // nextImage moves to the next image
@@ -390,12 +449,12 @@ func (iv *ImageViewer) nextImage(changeType string) {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	// Change ordering type if needed
 	if iv.imageSet.ChangeType != changeType {
 		iv.changeImageOrder(changeType)
 	}
-	
+
 	// Move to next image
 	iv.imageSet.SetPos = (iv.imageSet.SetPos + 1) % len(iv.imageSet.OrderedList)
 	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
@@ -406,12 +465,12 @@ func (iv *ImageViewer) prevImage(changeType string) {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	// Change ordering type if needed
 	if iv.imageSet.ChangeType != changeType {
 		iv.changeImageOrder(changeType)
 	}
-	
+
 	// Move to previous image
 	iv.imageSet.SetPos--
 	if iv.imageSet.SetPos < 0 {
@@ -425,7 +484,7 @@ func (iv *ImageViewer) firstImage() {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	iv.imageSet.SetPos = 0
 	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
 }
@@ -435,7 +494,7 @@ func (iv *ImageViewer) lastImage() {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	iv.imageSet.SetPos = len(iv.imageSet.OrderedList) - 1
 	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
 }
@@ -445,10 +504,10 @@ func (iv *ImageViewer) changeImageOrder(changeType string) {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	// Save current image
 	currentImage := iv.imageSet.OrderedList[iv.imageSet.SetPos]
-	
+
 	// Change ordering
 	switch changeType {
 	case "ordered":
@@ -456,26 +515,26 @@ func (iv *ImageViewer) changeImageOrder(changeType string) {
 	case "shuffled":
 		// First sort
 		sort.Strings(iv.imageSet.OrderedList)
-		
+
 		// Then shuffle in groups of 20
 		for i := 0; i < len(iv.imageSet.OrderedList); i++ {
 			var swapIndex int
-			if i < len(iv.imageSet.OrderedList) - 20 {
+			if i < len(iv.imageSet.OrderedList)-20 {
 				swapIndex = i + rand.Intn(20) + 1
 			} else {
 				swapIndex = rand.Intn(len(iv.imageSet.OrderedList) - i)
 			}
-			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[swapIndex] = 
+			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[swapIndex] =
 				iv.imageSet.OrderedList[swapIndex], iv.imageSet.OrderedList[i]
 		}
 	case "random":
 		// Full randomization
 		rand.Shuffle(len(iv.imageSet.OrderedList), func(i, j int) {
-			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[j] = 
+			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[j] =
 				iv.imageSet.OrderedList[j], iv.imageSet.OrderedList[i]
 		})
 	}
-	
+
 	// Find current image in new ordering
 	for i, img := range iv.imageSet.OrderedList {
 		if img == currentImage {
@@ -483,7 +542,7 @@ func (iv *ImageViewer) changeImageOrder(changeType string) {
 			break
 		}
 	}
-	
+
 	iv.imageSet.ChangeType = changeType
 }
 
@@ -543,13 +602,26 @@ func (iv *ImageViewer) fitToWindow() {
 
 // updateZoom applies the current zoom level
 func (iv *ImageViewer) updateZoom() {
-	// Apply zoom to image
+	// Get the original image size if available
+	if iv.imageCanvas == nil {
+		return
+	}
+
+	// Get current image size and calculate zoomed size
 	size := iv.imageCanvas.Size()
-	iv.imageCanvas.SetMinSize(fyne.NewSize(
-		float32(float64(size.Width) * iv.imgZoom),
-		float32(float64(size.Height) * iv.imgZoom),
-	))
-	iv.imageCanvas.Refresh()
+	if size.Width == 0 || size.Height == 0 {
+		// If image size is not yet available, use a default size
+		size = fyne.NewSize(800, 600)
+	}
+
+	// Apply zoom to image
+	zoomedSize := fyne.NewSize(
+		float32(float64(size.Width)*iv.imgZoom),
+		float32(float64(size.Height)*iv.imgZoom),
+	)
+
+	iv.imageCanvas.SetMinSize(zoomedSize)
+	iv.scrollView.Refresh()
 }
 
 // toggleFullscreen switches between windowed and fullscreen modes
@@ -578,10 +650,10 @@ func (iv *ImageViewer) toggleSlideshow() {
 		iv.slideshowActive = true
 		interval := time.Duration(iv.config.UI.SlideshowInterval) * time.Second
 		iv.showInfo(fmt.Sprintf("Slideshow started (interval: %d seconds)", iv.config.UI.SlideshowInterval))
-		
+
 		// Run immediately then schedule
 		iv.nextImage(iv.imageSet.ChangeType)
-		
+
 		iv.slideshowTimer = time.AfterFunc(interval, func() {
 			// This runs in a goroutine already
 			if iv.slideshowActive {
@@ -600,35 +672,35 @@ func (iv *ImageViewer) moveImage(destDir string) {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	srcPath := iv.imageSet.OrderedList[iv.imageSet.SetPos]
 	destPath := filepath.Join(destDir, filepath.Base(srcPath))
-	
+
 	// Check if destination exists
 	if _, err := os.Stat(destPath); err == nil {
 		iv.showInfo(fmt.Sprintf("Image already exists in %s", destDir))
 		return
 	}
-	
+
 	// Move the file
 	if err := os.Rename(srcPath, destPath); err != nil {
 		iv.showInfo(fmt.Sprintf("Error moving image: %v", err))
 		return
 	}
-	
+
 	// Remove from list and load next image
 	iv.imageSet.OrderedList = append(
 		iv.imageSet.OrderedList[:iv.imageSet.SetPos],
 		iv.imageSet.OrderedList[iv.imageSet.SetPos+1:]...,
 	)
-	
+
 	if len(iv.imageSet.OrderedList) > 0 {
 		if iv.imageSet.SetPos >= len(iv.imageSet.OrderedList) {
 			iv.imageSet.SetPos = 0
 		}
 		iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
 	}
-	
+
 	iv.showInfo(fmt.Sprintf("Moved to %s", destDir))
 }
 
@@ -637,28 +709,28 @@ func (iv *ImageViewer) copyImage(destDir string) {
 	if len(iv.imageSet.OrderedList) == 0 {
 		return
 	}
-	
+
 	srcPath := iv.imageSet.OrderedList[iv.imageSet.SetPos]
 	destPath := filepath.Join(destDir, filepath.Base(srcPath))
-	
+
 	// Check if destination exists
 	if _, err := os.Stat(destPath); err == nil {
 		iv.showInfo(fmt.Sprintf("Image already exists in %s", destDir))
 		return
 	}
-	
+
 	// Copy the file
-	srcFile, err := ioutil.ReadFile(srcPath)
+	srcFile, err := os.ReadFile(srcPath)
 	if err != nil {
 		iv.showInfo(fmt.Sprintf("Error reading image: %v", err))
 		return
 	}
-	
-	if err := ioutil.WriteFile(destPath, srcFile, 0644); err != nil {
+
+	if err := os.WriteFile(destPath, srcFile, 0644); err != nil {
 		iv.showInfo(fmt.Sprintf("Error copying image: %v", err))
 		return
 	}
-	
+
 	iv.showInfo(fmt.Sprintf("Copied to %s", destDir))
 }
 
@@ -688,7 +760,7 @@ func (iv *ImageViewer) handleCopyCommand(key string) {
 func (iv *ImageViewer) showInfo(text string) {
 	iv.infoLabel.SetText(text)
 	iv.infoLabel.Show()
-	
+
 	// Auto-hide after a delay
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -712,10 +784,10 @@ func (iv *ImageViewer) showDestinations() {
 			destinations = append(destinations, fmt.Sprintf("%s: %s", key[5:], value))
 		}
 	}
-	
+
 	iv.giantInfo.SetText(fmt.Sprintf("Available destinations:\n%s", strings.Join(destinations, "\n")))
 	iv.giantInfo.Show()
-	
+
 	// Auto-hide after a delay
 	go func() {
 		time.Sleep(2 * time.Second)
