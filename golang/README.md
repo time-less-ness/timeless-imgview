@@ -1,6 +1,7 @@
 # Timeless Image Viewer (Golang Version)
 
-A simple image viewer written in Go using the Fyne UI toolkit.
+A simple image viewer written in Go using the Fyne UI toolkit. This is experimental, and as
+of this moment, does not work. If you know how to make it work, feel free to submit PR.
 
 ## Features
 
