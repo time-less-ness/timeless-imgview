@@ -17,8 +17,9 @@ from kivy.config import Config
 # stop the annoying red dot on right-click
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
-Logger.setLevel(LOG_LEVELS["info"])
-#Logger.setLevel(LOG_LEVELS["debug"])
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'info')
+Logger.setLevel(LOG_LEVELS[LOG_LEVEL])
+Logger.info(f"LOG_LEVEL={LOG_LEVEL}, to force to some level, export LOG_LEVEL=info (or debug,..) before starting.")
 
 deviceRes = [3456, 2234]
 resStr = None
