@@ -23,6 +23,15 @@ class MainImage(Image):
         # can be bigger than bounding widget
         self.allow_stretch = True
 
+        # enable texture interpolation for better quality when downscaling
+        self.bind(texture=self._on_texture_update)
+
+    def _on_texture_update(self, instance, texture):
+        """Enable linear/bicubic interpolation for better quality when downscaling"""
+        if texture:
+            texture.mag_filter = 'linear'
+            texture.min_filter = 'linear'
+
     def set_window_pos(self):
         # make sure image doesn't go wonky if it's smaller than
         # the display window - otherwise try to centerish it
