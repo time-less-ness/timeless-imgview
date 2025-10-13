@@ -33,8 +33,9 @@ type ImageViewer struct {
 	feedbackLabel  *widget.Label
 	zoomLevel      float32
 	changeType     string // "ordered", "random", "shuffled"
-	shuffledOrder  []int
-	shuffledIndex  int
+	// Only one active navigation list at a time
+	navOrder       []int  // Current navigation order (ordered, shuffled, or random)
+	navIndex       int    // Current position in navOrder
 	trashDir       string
 	slideshow      bool
 	slideshowTimer *time.Ticker
@@ -46,10 +47,23 @@ type ImageViewer struct {
 	lastScrollTime   time.Time
 	scrollPixels     float32
 	scrollResetDelay time.Duration
+	// Image preloading cache
+	imageCache      map[string]*imageInfo
+	preloadChan     chan int
+}
+
+// imageInfo holds cached image data
+type imageInfo struct {
+	width  int
+	height int
+	// Could cache decoded image data here too if needed
 }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	// Seed random number generator
+	rand.Seed(time.Now().UnixNano())
 
 	// Create app
 	myApp := app.New()
@@ -62,11 +76,17 @@ func main() {
 		zoomLevel:        1.0,
 		changeType:       "ordered",
 		currentIndex:     0,
+		navIndex:         0,
 		trashDir:         filepath.Join(os.Getenv("HOME"), ".Trash"),
 		slideshowStop:    make(chan bool),
 		scrollPixels:     10.0,
 		scrollResetDelay: 500 * time.Millisecond,
+		imageCache:       make(map[string]*imageInfo),
+		preloadChan:      make(chan int, 10),
 	}
+
+	// Start preloader goroutine
+	go viewer.preloader()
 
 	// Collect images from command line
 	viewer.collectImages(os.Args[1:])
@@ -77,6 +97,12 @@ func main() {
 	}
 
 	log.Printf("Found %d images to display\n", len(viewer.images))
+
+	// Initialize ordered navigation list
+	viewer.navOrder = make([]int, len(viewer.images))
+	for i := range viewer.navOrder {
+		viewer.navOrder[i] = i
+	}
 
 	// Create UI
 	viewer.setupUI()
@@ -100,7 +126,7 @@ func (v *ImageViewer) collectImages(args []string) {
 	}
 
 	imageMap := make(map[string]bool)
-	shouldSort := false
+	hasDirectories := false
 
 	for _, arg := range args {
 		info, err := os.Stat(arg)
@@ -110,7 +136,7 @@ func (v *ImageViewer) collectImages(args []string) {
 		}
 
 		if info.IsDir() {
-			shouldSort = true
+			hasDirectories = true
 			entries, err := os.ReadDir(arg)
 			if err != nil {
 				log.Printf("Warning: cannot read directory %s: %v\n", arg, err)
@@ -132,20 +158,25 @@ func (v *ImageViewer) collectImages(args []string) {
 				}
 			}
 		} else {
-			// It's a file
-			imageMap[arg] = true
+			// It's a file - add in order received
+			if !imageMap[arg] {
+				imageMap[arg] = true
+				v.images = append(v.images, arg)
+			}
 		}
 	}
 
-	// Convert map to slice
-	for img := range imageMap {
-		v.images = append(v.images, img)
-	}
-
-	// Sort if we collected from directories
-	if shouldSort {
+	// If we collected from directories, we need to add those files and sort everything
+	if hasDirectories {
+		// Reset the slice and rebuild from map
+		v.images = nil
+		for img := range imageMap {
+			v.images = append(v.images, img)
+		}
+		// Sort when collecting from directories
 		sort.Strings(v.images)
 	}
+	// Otherwise, files are already in v.images in the order they were passed
 }
 
 // setupUI creates the user interface
@@ -177,6 +208,79 @@ func (v *ImageViewer) setupUI() {
 	v.window.SetContent(content)
 }
 
+// preloader runs in background and preloads adjacent images
+func (v *ImageViewer) preloader() {
+	for index := range v.preloadChan {
+		// Determine which indices to preload based on navigation mode
+		var indicesToPreload []int
+
+		switch v.changeType {
+		case "ordered":
+			// Preload previous and next in ordered list
+			if index > 0 {
+				indicesToPreload = append(indicesToPreload, index-1)
+			}
+			if index < len(v.images)-1 {
+				indicesToPreload = append(indicesToPreload, index+1)
+			}
+
+		case "shuffled", "random":
+			if v.navOrder != nil {
+				// Preload previous and next in current navigation order
+				prevIdx := v.navIndex - 1
+				if prevIdx < 0 {
+					prevIdx = len(v.navOrder) - 1
+				}
+				nextIdx := v.navIndex + 1
+				if nextIdx >= len(v.navOrder) {
+					nextIdx = 0
+				}
+				indicesToPreload = append(indicesToPreload, v.navOrder[prevIdx], v.navOrder[nextIdx])
+			}
+		}
+
+		// Preload the identified images
+		for _, preloadIdx := range indicesToPreload {
+			if preloadIdx < 0 || preloadIdx >= len(v.images) {
+				continue
+			}
+
+			imgPath := v.images[preloadIdx]
+
+			// Skip if already cached
+			if _, exists := v.imageCache[imgPath]; exists {
+				continue
+			}
+
+			// Load and cache dimensions
+			if info := v.loadImageInfo(imgPath); info != nil {
+				v.imageCache[imgPath] = info
+				log.Printf("Preloaded (%s): %s [%dx%d]\n", v.changeType, filepath.Base(imgPath), info.width, info.height)
+			}
+		}
+	}
+}
+
+// loadImageInfo loads image dimensions without keeping the decoded data
+func (v *ImageViewer) loadImageInfo(path string) *imageInfo {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil
+	}
+
+	bounds := img.Bounds()
+	return &imageInfo{
+		width:  bounds.Dx(),
+		height: bounds.Dy(),
+	}
+}
+
 // loadImage loads and displays the image at the given index
 func (v *ImageViewer) loadImage(index int) {
 	if index < 0 || index >= len(v.images) {
@@ -186,42 +290,51 @@ func (v *ImageViewer) loadImage(index int) {
 	v.currentIndex = index
 	imgPath := v.images[index]
 
-	// Load image to get dimensions and cache them
-	file, err := os.Open(imgPath)
-	if err != nil {
-		log.Printf("Error opening image %s: %v\n", imgPath, err)
-		v.showFeedback(fmt.Sprintf("Error loading image: %v", err), 3*time.Second)
-		return
+	// Check if dimensions are cached
+	if info, exists := v.imageCache[imgPath]; exists {
+		v.currentImgWidth = info.width
+		v.currentImgHeight = info.height
+		log.Printf("Using cached dimensions for %s [%dx%d]\n", filepath.Base(imgPath), info.width, info.height)
+	} else {
+		// Load image to get dimensions and cache them
+		if info := v.loadImageInfo(imgPath); info != nil {
+			v.currentImgWidth = info.width
+			v.currentImgHeight = info.height
+			v.imageCache[imgPath] = info
+		} else {
+			log.Printf("Error loading image %s\n", imgPath)
+			v.showFeedback("Error loading image", 3*time.Second)
+			return
+		}
 	}
-	defer file.Close()
 
-	img, _, err := image.Decode(file)
-	if err != nil {
-		log.Printf("Error decoding image %s: %v\n", imgPath, err)
-		v.showFeedback(fmt.Sprintf("Error decoding image: %v", err), 3*time.Second)
-		return
-	}
+	start := time.Now()
+	log.Printf("loadImage: START loading %s", filepath.Base(imgPath))
 
-	// Cache dimensions for fast zoom operations
-	bounds := img.Bounds()
-	v.currentImgWidth = bounds.Dx()
-	v.currentImgHeight = bounds.Dy()
-
-	// Update the canvas image
+	// Update the canvas image file path
 	v.currentImage.File = imgPath
-	v.currentImage.Refresh()
+	log.Printf("loadImage: File set (%v)", time.Since(start))
 
-	// Reset zoom
+	// Reset zoom and fit to window
+	// Note: fitToWindow() will refresh the canvas, so we don't need to refresh here
 	v.zoomLevel = 1.0
 	v.fitToWindow()
+	log.Printf("loadImage: fitToWindow done (%v)", time.Since(start))
 
 	// Update window title
 	v.window.SetTitle(fmt.Sprintf("Timeless Image Viewer - %s (%d/%d)",
 		filepath.Base(imgPath), index+1, len(v.images)))
 
-	log.Printf("Loaded image %d/%d: %s [%dx%d]\n",
+	log.Printf("Loaded image %d/%d: %s [%dx%d] (total: %v)\n",
 		index+1, len(v.images), filepath.Base(imgPath),
-		v.currentImgWidth, v.currentImgHeight)
+		v.currentImgWidth, v.currentImgHeight, time.Since(start))
+
+	// Trigger preloading of adjacent images
+	select {
+	case v.preloadChan <- index:
+	default:
+		// Channel full, skip preload request
+	}
 }
 
 // fitToWindow scales the image to fit the window
@@ -262,76 +375,123 @@ func (v *ImageViewer) setZoom(zoom float32) {
 	log.Printf("setZoom: DONE (%v total)", time.Since(start))
 }
 
+// ensureNavOrder creates navigation order if needed and updates navIndex to current position
+func (v *ImageViewer) ensureNavOrder(changeType string) {
+	// If switching navigation modes, create new order
+	if v.changeType != changeType || v.navOrder == nil {
+		v.changeType = changeType
+
+		switch changeType {
+		case "ordered":
+			// Always recreate ordered list when switching to ordered mode
+			v.navOrder = make([]int, len(v.images))
+			for i := range v.navOrder {
+				v.navOrder[i] = i
+			}
+			// Find current image in ordered list
+			v.navIndex = v.currentIndex
+
+		case "random":
+			v.initRandom()
+			// Find current image in random order
+			for i, idx := range v.navOrder {
+				if idx == v.currentIndex {
+					v.navIndex = i
+					break
+				}
+			}
+
+		case "shuffled":
+			v.initShuffle()
+			// Find current image in shuffled order
+			for i, idx := range v.navOrder {
+				if idx == v.currentIndex {
+					v.navIndex = i
+					break
+				}
+			}
+		}
+	}
+}
+
 // nextImage advances to the next image based on change type
 func (v *ImageViewer) nextImage(changeType string, skip int) {
-	v.changeType = changeType
+	log.Printf("nextImage: changeType=%s, skip=%d, currentIndex=%d, navIndex=%d", changeType, skip, v.currentIndex, v.navIndex)
+	v.ensureNavOrder(changeType)
 
-	switch changeType {
-	case "ordered":
-		newIndex := v.currentIndex + skip
-		if newIndex >= len(v.images) {
-			newIndex = len(v.images) - 1
-		}
-		v.loadImage(newIndex)
-
-	case "random":
-		if len(v.images) > 1 {
-			newIndex := rand.Intn(len(v.images))
-			v.loadImage(newIndex)
-		}
-
-	case "shuffled":
-		if v.shuffledOrder == nil {
-			v.initShuffle()
-		}
-		v.shuffledIndex++
-		if v.shuffledIndex >= len(v.shuffledOrder) {
-			v.shuffledIndex = 0
-		}
-		v.loadImage(v.shuffledOrder[v.shuffledIndex])
+	// Navigate forward in current order
+	oldNavIndex := v.navIndex
+	v.navIndex += skip
+	if v.navIndex >= len(v.navOrder) {
+		v.navIndex = len(v.navOrder) - 1
 	}
+
+	log.Printf("nextImage: navIndex %d -> %d, will load image index %d (%s)",
+		oldNavIndex, v.navIndex, v.navOrder[v.navIndex], filepath.Base(v.images[v.navOrder[v.navIndex]]))
+	v.loadImage(v.navOrder[v.navIndex])
 }
 
 // prevImage goes to the previous image based on change type
 func (v *ImageViewer) prevImage(changeType string, skip int) {
-	v.changeType = changeType
+	v.ensureNavOrder(changeType)
 
-	switch changeType {
-	case "ordered":
-		newIndex := v.currentIndex - skip
-		if newIndex < 0 {
-			newIndex = 0
-		}
-		v.loadImage(newIndex)
-
-	case "random":
-		if len(v.images) > 1 {
-			newIndex := rand.Intn(len(v.images))
-			v.loadImage(newIndex)
-		}
-
-	case "shuffled":
-		if v.shuffledOrder == nil {
-			v.initShuffle()
-		}
-		v.shuffledIndex--
-		if v.shuffledIndex < 0 {
-			v.shuffledIndex = len(v.shuffledOrder) - 1
-		}
-		v.loadImage(v.shuffledOrder[v.shuffledIndex])
+	// Navigate backward in current order
+	v.navIndex -= skip
+	if v.navIndex < 0 {
+		v.navIndex = 0
 	}
+
+	v.loadImage(v.navOrder[v.navIndex])
 }
 
-// initShuffle creates a shuffled order of indices
-func (v *ImageViewer) initShuffle() {
-	v.shuffledOrder = make([]int, len(v.images))
-	for i := range v.shuffledOrder {
-		v.shuffledOrder[i] = i
+// initRandom creates a randomized order of indices
+func (v *ImageViewer) initRandom() {
+	v.navOrder = make([]int, len(v.images))
+	for i := range v.navOrder {
+		v.navOrder[i] = i
 	}
-	rand.Shuffle(len(v.shuffledOrder), func(i, j int) {
-		v.shuffledOrder[i], v.shuffledOrder[j] = v.shuffledOrder[j], v.shuffledOrder[i]
+	rand.Shuffle(len(v.navOrder), func(i, j int) {
+		v.navOrder[i], v.navOrder[j] = v.navOrder[j], v.navOrder[i]
 	})
-	v.shuffledIndex = 0
+	v.navIndex = 0
+	log.Printf("Initialized random order for %d images\n", len(v.navOrder))
+}
+
+// initShuffle creates a semi-shuffled order of indices
+// Similar to Python version: start ordered, then swap each element with
+// a random neighbor up to ~20 positions away
+func (v *ImageViewer) initShuffle() {
+	v.navOrder = make([]int, len(v.images))
+	// Start with ordered list
+	for i := range v.navOrder {
+		v.navOrder[i] = i
+	}
+
+	// Do a single pass, swapping each position with a random nearby position
+	maxSwapDistance := 20
+	for i := range v.navOrder {
+		// Pick a random offset up to maxSwapDistance away
+		offset := rand.Intn(maxSwapDistance + 1)
+		// Randomly choose forward or backward
+		if rand.Intn(2) == 0 {
+			offset = -offset
+		}
+
+		// Calculate swap position, keeping it in bounds
+		swapPos := i + offset
+		if swapPos < 0 {
+			swapPos = 0
+		}
+		if swapPos >= len(v.navOrder) {
+			swapPos = len(v.navOrder) - 1
+		}
+
+		// Swap
+		v.navOrder[i], v.navOrder[swapPos] = v.navOrder[swapPos], v.navOrder[i]
+	}
+
+	v.navIndex = 0
+	log.Printf("Initialized semi-shuffled order for %d images (max swap distance: %d)\n", len(v.navOrder), maxSwapDistance)
 }
 
 // deleteCurrentImage moves the current image to trash
