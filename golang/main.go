@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"image/color"
-	"io"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -17,788 +19,571 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
-// Config stores application configuration
-type Config struct {
-	ReadOnlySettings map[string]string `json:"readOnlySettings"`
-	UI               struct {
-		FeedbackFg        string `json:"feedbackFg"`
-		FeedbackBg        string `json:"feedbackBg"`
-		FeedbackFontSize  int    `json:"feedbackFontSize"`
-		SlideshowInterval int    `json:"slideshowInterval"`
-	} `json:"ui"`
-	LastRun struct {
-		LastGeom string `json:"lastGeom"`
-	} `json:"lastRun"`
-}
-
-// ImageSet stores information about the current image set
-type ImageSet struct {
-	DeleteDir   string   `json:"deleteDir"`
-	SetPos      int      `json:"setPos"`
-	ChangeType  string   `json:"changeType"`
-	OrderedList []string `json:"orderedList"`
-}
-
-// ImageViewer represents the main application
+// ImageViewer holds the state of the image viewer
 type ImageViewer struct {
-	window      fyne.Window
-	imageCanvas *canvas.Image
-	scrollView  *container.Scroll
-	infoLabel   *widget.Label
-	giantInfo   *widget.Label
-	config      *Config
-	imageSet    *ImageSet
-
-	// Window management
-	deviceRes  []int
-	windowZoom float64
-	imgZoom    float64
-	fullscreen bool
-	lastSize   fyne.Size
-	lastPos    fyne.Position
-
-	// Scrolling
-	scrollingDir [4]bool
-	scrollPix    int
-
-	// Slideshow
-	slideshowActive bool
-	slideshowTimer  *time.Timer
-
-	// Key tracking for multi-key commands
-	lastKeyTime time.Time
-	previousKey string
-	currentKey  string
+	app            fyne.App
+	window         fyne.Window
+	images         []string
+	currentIndex   int
+	currentImage   *canvas.Image
+	scroll         *container.Scroll
+	feedbackLabel  *widget.Label
+	zoomLevel      float32
+	changeType     string // "ordered", "random", "shuffled"
+	shuffledOrder  []int
+	shuffledIndex  int
+	trashDir       string
+	slideshow      bool
+	slideshowTimer *time.Ticker
+	slideshowStop  chan bool
+	// Cache current image dimensions to avoid repeated decoding
+	currentImgWidth  int
+	currentImgHeight int
+	// Progressive scrolling state
+	lastScrollTime   time.Time
+	scrollPixels     float32
+	scrollResetDelay time.Duration
 }
 
 func main() {
-	// Initialize random seed
-	rand.Seed(time.Now().UnixNano())
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// Create application with proper theme
-	a := app.New()
-	w := a.NewWindow("Timeless Image Viewer")
+	// Create app
+	myApp := app.New()
+	myWindow := myApp.NewWindow("Timeless Image Viewer")
 
-	// Create the image viewer
-	viewer := NewImageViewer(w)
-
-	// Ensure the window has a good size before showing
-	w.Resize(fyne.NewSize(1280, 720))
-
-	// Show the window and run the application
-	w.ShowAndRun()
-
-	// Save config on exit
-	viewer.saveConfig()
-}
-
-// NewImageViewer creates a new image viewer
-func NewImageViewer(window fyne.Window) *ImageViewer {
-	// Initialize image viewer
-	iv := &ImageViewer{
-		window:       window,
-		deviceRes:    []int{1920, 1080},
-		windowZoom:   1.0,
-		imgZoom:      1.0,
-		fullscreen:   false,
-		scrollingDir: [4]bool{false, false, false, false},
-		scrollPix:    1,
+	// Create viewer
+	viewer := &ImageViewer{
+		app:              myApp,
+		window:           myWindow,
+		zoomLevel:        1.0,
+		changeType:       "ordered",
+		currentIndex:     0,
+		trashDir:         filepath.Join(os.Getenv("HOME"), ".Trash"),
+		slideshowStop:    make(chan bool),
+		scrollPixels:     10.0,
+		scrollResetDelay: 500 * time.Millisecond,
 	}
 
-	// Load config
-	iv.loadConfig()
+	// Collect images from command line
+	viewer.collectImages(os.Args[1:])
 
-	// Create UI components
-	iv.setupUI()
+	if len(viewer.images) == 0 {
+		log.Println("No images found to display")
+		os.Exit(1)
+	}
 
-	// Set up keyboard shortcuts
-	iv.setupKeyboardShortcuts()
+	log.Printf("Found %d images to display\n", len(viewer.images))
 
-	// Get images from command line arguments
-	iv.getImages()
+	// Create UI
+	viewer.setupUI()
 
 	// Load first image
-	if len(iv.imageSet.OrderedList) > 0 {
-		iv.loadImage(iv.imageSet.OrderedList[0])
-	}
+	viewer.loadImage(0)
 
-	return iv
+	// Set up keyboard handling
+	myWindow.Canvas().SetOnTypedKey(viewer.handleKeyPress)
+	myWindow.Canvas().SetOnTypedRune(viewer.handleRunePress)
+
+	// Show and run
+	myWindow.Resize(fyne.NewSize(1920, 1080))
+	myWindow.ShowAndRun()
 }
 
-// loadConfig loads the application configuration
-func (iv *ImageViewer) loadConfig() {
-	iv.config = &Config{}
-
-	// Default configuration
-	iv.config.ReadOnlySettings = map[string]string{
-		"dest-a": "~/AI-Images",
-		"dest-d": "~/AI-Documents",
-		"dest-f": "~/Family-Photos",
-		"dest-w": "~/Work-Photos",
-		"dest-t": "/tmp",
-	}
-
-	iv.config.UI.FeedbackFg = "0.85,0.85,0.85,0.9"
-	iv.config.UI.FeedbackBg = "0.05,0.05,0.05,0.3"
-	iv.config.UI.FeedbackFontSize = 32
-	iv.config.UI.SlideshowInterval = 20
-
-	iv.config.LastRun.LastGeom = "1920x1080+0,0"
-
-	// Try to load from config file
-	configPath := filepath.Join(os.Getenv("HOME"), ".tiviewrc.json")
-	data, err := os.ReadFile(configPath)
-	if err == nil {
-		// Config exists, load it
-		json.Unmarshal(data, iv.config)
-	} else {
-		// Config doesn't exist, create it
-		iv.saveConfig()
-	}
-
-	// Set up the image set
-	iv.imageSet = &ImageSet{
-		DeleteDir:   filepath.Join(os.Getenv("HOME"), ".Trash"),
-		SetPos:      0,
-		ChangeType:  "ordered",
-		OrderedList: []string{},
-	}
-}
-
-// saveConfig saves the configuration to file
-func (iv *ImageViewer) saveConfig() {
-	configPath := filepath.Join(os.Getenv("HOME"), ".tiviewrc.json")
-	data, _ := json.MarshalIndent(iv.config, "", "  ")
-	os.WriteFile(configPath, data, 0644)
-}
-
-// setupUI initializes the UI components
-func (iv *ImageViewer) setupUI() {
-	// Create a placeholder image with explicit size for startup
-	placeholder := canvas.NewRectangle(color.Transparent)
-	placeholder.SetMinSize(fyne.NewSize(800, 600))
-
-	// Create image canvas
-	iv.imageCanvas = &canvas.Image{
-		FillMode: canvas.ImageFillContain,
-	}
-
-	// Create scroll container with the placeholder initially
-	iv.scrollView = container.NewScroll(container.NewCenter(placeholder))
-
-	// Create info label
-	iv.infoLabel = widget.NewLabel("")
-	iv.infoLabel.TextStyle = fyne.TextStyle{
-		Bold: true,
-	}
-
-	// Create giant info label for move destinations
-	iv.giantInfo = widget.NewLabel("")
-	iv.giantInfo.TextStyle = fyne.TextStyle{
-		Bold: true,
-	}
-
-	// Create overlay for labels
-	overlay := container.NewWithoutLayout(
-		iv.scrollView,
-		container.NewVBox(
-			layout.NewSpacer(),
-			container.NewHBox(layout.NewSpacer(), iv.giantInfo, layout.NewSpacer()),
-			container.NewHBox(layout.NewSpacer(), iv.infoLabel, layout.NewSpacer()),
-		),
-	)
-
-	// Set the content
-	iv.window.SetContent(overlay)
-
-	// Clear initial labels
-	iv.clearInfoLabel()
-	iv.clearGiantInfo()
-}
-
-// setupKeyboardShortcuts sets up keyboard shortcuts
-func (iv *ImageViewer) setupKeyboardShortcuts() {
-	iv.window.Canvas().(desktop.Canvas).SetOnKeyDown(func(key *fyne.KeyEvent) {
-		iv.handleKeyDown(key)
-	})
-}
-
-// handleKeyDown processes keyboard input
-func (iv *ImageViewer) handleKeyDown(key *fyne.KeyEvent) {
-	// Handle navigation keys
-	switch key.Name {
-	case fyne.KeyUp:
-		// Scroll up
-		iv.scrollUp()
-	case fyne.KeyDown:
-		// Scroll down
-		iv.scrollDown()
-	case fyne.KeyLeft:
-		// Scroll left
-		iv.scrollLeft()
-	case fyne.KeyRight:
-		// Scroll right
-		iv.scrollRight()
-	case fyne.KeyPageDown:
-		// Next image
-		iv.nextImage("ordered")
-	case fyne.KeyPageUp:
-		// Previous image
-		iv.prevImage("ordered")
-	case fyne.KeyHome:
-		// First image
-		iv.firstImage()
-	case fyne.KeyEnd:
-		// Last image
-		iv.lastImage()
-	case fyne.KeyDelete:
-		// Delete image
-		iv.moveImage(iv.imageSet.DeleteDir)
-	}
-
-	// Handle other keys
-	switch string(key.Name) {
-	case "s":
-		// Toggle slideshow
-		iv.toggleSlideshow()
-	case "x":
-		// Fit to window
-		iv.fitToWindow()
-	case "z", "1":
-		// 1:1 zoom
-		iv.zoomOneToOne()
-	case "+", "=":
-		// Zoom in
-		iv.zoomIn()
-	case "-", "_":
-		// Zoom out
-		iv.zoomOut()
-	case "2":
-		// Zoom to 2x
-		iv.zoomTo(2.0)
-	case "3":
-		// Zoom to 3x
-		iv.zoomTo(3.0)
-	case "4":
-		// Zoom to 4x
-		iv.zoomTo(4.0)
-	case ".", ">":
-		// Next random image
-		iv.nextImage("random")
-	case ",", "<":
-		// Previous random image
-		iv.prevImage("random")
-	case "]":
-		// Next shuffled image
-		iv.nextImage("shuffled")
-	case "[":
-		// Previous shuffled image
-		iv.prevImage("shuffled")
-	case "'", "\"":
-		// Next image
-		iv.nextImage("ordered")
-	case ";", ":":
-		// Previous image
-		iv.prevImage("ordered")
-	case "f":
-		// Toggle fullscreen
-		iv.toggleFullscreen()
-	case "q":
-		// Prepare for quit
-		now := time.Now()
-		if now.Sub(iv.lastKeyTime) < time.Second && iv.previousKey == "q" {
-			iv.window.Close()
-		} else {
-			iv.showInfo("Press q again to quit")
-			iv.previousKey = "q"
-			iv.lastKeyTime = now
-		}
-	case "m":
-		// Prepare for move
-		now := time.Now()
-		if now.Sub(iv.lastKeyTime) < time.Second {
-			// Handle second key for move
-			iv.handleMoveCommand(iv.currentKey)
-		} else {
-			iv.showDestinations()
-			iv.previousKey = "m"
-			iv.lastKeyTime = now
-		}
-	case "c":
-		// Prepare for copy
-		now := time.Now()
-		if now.Sub(iv.lastKeyTime) < time.Second {
-			// Handle second key for copy
-			iv.handleCopyCommand(iv.currentKey)
-		} else {
-			iv.showDestinations()
-			iv.previousKey = "c"
-			iv.lastKeyTime = now
-		}
-	default:
-		// Store key for multi-key commands
-		iv.currentKey = string(key.Name)
-	}
-}
-
-// getImages collects images from command line arguments or current directory
-func (iv *ImageViewer) getImages() {
-	// Clear the image list
-	iv.imageSet.OrderedList = []string{}
-
-	// Get image paths
-	args := os.Args[1:]
+// collectImages gathers all image files from command line arguments
+func (v *ImageViewer) collectImages(args []string) {
 	if len(args) == 0 {
 		args = []string{"."}
 	}
 
+	imageMap := make(map[string]bool)
+	shouldSort := false
+
 	for _, arg := range args {
 		info, err := os.Stat(arg)
 		if err != nil {
+			log.Printf("Warning: cannot access %s: %v\n", arg, err)
 			continue
 		}
 
 		if info.IsDir() {
-			// Add images from directory
-			files, _ := os.ReadDir(arg)
-			for _, file := range files {
-				if fileInfo, err := file.Info(); err == nil && !fileInfo.IsDir() {
-					name := strings.ToLower(file.Name())
-					if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") ||
-						strings.HasSuffix(name, ".png") {
-						iv.imageSet.OrderedList = append(iv.imageSet.OrderedList, filepath.Join(arg, file.Name()))
-					}
+			shouldSort = true
+			entries, err := os.ReadDir(arg)
+			if err != nil {
+				log.Printf("Warning: cannot read directory %s: %v\n", arg, err)
+				continue
+			}
+
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				lower := strings.ToLower(name)
+				if strings.HasSuffix(lower, ".jpg") ||
+					strings.HasSuffix(lower, ".jpeg") ||
+					strings.HasSuffix(lower, ".png") ||
+					strings.HasSuffix(lower, ".gif") {
+					fullPath := filepath.Join(arg, name)
+					imageMap[fullPath] = true
 				}
 			}
 		} else {
-			// Add single file
-			name := strings.ToLower(arg)
-			if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") ||
-				strings.HasSuffix(name, ".png") {
-				iv.imageSet.OrderedList = append(iv.imageSet.OrderedList, arg)
-			}
+			// It's a file
+			imageMap[arg] = true
 		}
 	}
 
-	// Sort the list
-	sort.Strings(iv.imageSet.OrderedList)
+	// Convert map to slice
+	for img := range imageMap {
+		v.images = append(v.images, img)
+	}
+
+	// Sort if we collected from directories
+	if shouldSort {
+		sort.Strings(v.images)
+	}
 }
 
-// loadImage loads an image from a file path
-func (iv *ImageViewer) loadImage(path string) {
-	// Debug info
-	fmt.Printf("Loading image: %s\n", path)
+// setupUI creates the user interface
+func (v *ImageViewer) setupUI() {
+	// Create image widget
+	v.currentImage = canvas.NewImageFromFile("")
+	v.currentImage.FillMode = canvas.ImageFillContain
+	// Use fastest scaling for better performance with large images
+	v.currentImage.ScaleMode = canvas.ImageScaleFastest
 
-	// Verify the file exists
-	_, err := os.Stat(path)
+	// Create scroll container
+	v.scroll = container.NewScroll(v.currentImage)
+	v.scroll.Direction = container.ScrollBoth
+
+	// Create feedback label (bottom overlay)
+	v.feedbackLabel = widget.NewLabel("")
+	v.feedbackLabel.TextStyle = fyne.TextStyle{Bold: true}
+	v.feedbackLabel.Hide()
+
+	// Create overlay with image and feedback
+	content := container.NewStack(
+		v.scroll,
+		container.NewVBox(
+			widget.NewLabel(""), // spacer
+			v.feedbackLabel,
+		),
+	)
+
+	v.window.SetContent(content)
+}
+
+// loadImage loads and displays the image at the given index
+func (v *ImageViewer) loadImage(index int) {
+	if index < 0 || index >= len(v.images) {
+		return
+	}
+
+	v.currentIndex = index
+	imgPath := v.images[index]
+
+	// Load image to get dimensions and cache them
+	file, err := os.Open(imgPath)
 	if err != nil {
-		fmt.Printf("Error checking file: %v\n", err)
-		iv.showInfo(fmt.Sprintf("Error: %v", err))
+		log.Printf("Error opening image %s: %v\n", imgPath, err)
+		v.showFeedback(fmt.Sprintf("Error loading image: %v", err), 3*time.Second)
 		return
 	}
+	defer file.Close()
 
-	// Ensure URI format for Fyne storage
-	uri := storage.NewFileURI(path)
-
-	// Create new resource
-	read, err := storage.OpenFileFromURI(uri)
+	img, _, err := image.Decode(file)
 	if err != nil {
-		fmt.Printf("Error opening file: %v\n", err)
-		iv.showInfo(fmt.Sprintf("Error opening file: %v", err))
-		return
-	}
-	defer read.Close()
-
-	// Read all data
-	data, err := io.ReadAll(read)
-	if err != nil {
-		fmt.Printf("Error reading file data: %v\n", err)
-		iv.showInfo(fmt.Sprintf("Error reading file data: %v", err))
+		log.Printf("Error decoding image %s: %v\n", imgPath, err)
+		v.showFeedback(fmt.Sprintf("Error decoding image: %v", err), 3*time.Second)
 		return
 	}
 
-	// Create static resource
-	res := fyne.NewStaticResource(filepath.Base(path), data)
+	// Cache dimensions for fast zoom operations
+	bounds := img.Bounds()
+	v.currentImgWidth = bounds.Dx()
+	v.currentImgHeight = bounds.Dy()
 
-	// Create image from resource
-	img := canvas.NewImageFromResource(res)
-	img.FillMode = canvas.ImageFillContain
-	img.ScaleMode = canvas.ImageScaleSmooth
+	// Update the canvas image
+	v.currentImage.File = imgPath
+	v.currentImage.Refresh()
 
-	// Replace the image in the UI
-	iv.imageCanvas = img
-	iv.scrollView.Content = container.NewCenter(iv.imageCanvas)
+	// Reset zoom
+	v.zoomLevel = 1.0
+	v.fitToWindow()
 
-	// Force refresh everything
-	iv.scrollView.Refresh()
-	currentSize := iv.window.Content().Size()
-	iv.window.Resize(currentSize)
-	iv.window.SetTitle(fmt.Sprintf("Timeless Image Viewer - %s", filepath.Base(path)))
+	// Update window title
+	v.window.SetTitle(fmt.Sprintf("Timeless Image Viewer - %s (%d/%d)",
+		filepath.Base(imgPath), index+1, len(v.images)))
 
-	// Debug confirmation
-	fmt.Printf("Image loaded successfully: %s\n", filepath.Base(path))
+	log.Printf("Loaded image %d/%d: %s [%dx%d]\n",
+		index+1, len(v.images), filepath.Base(imgPath),
+		v.currentImgWidth, v.currentImgHeight)
 }
 
-// nextImage moves to the next image
-func (iv *ImageViewer) nextImage(changeType string) {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
+// fitToWindow scales the image to fit the window
+func (v *ImageViewer) fitToWindow() {
+	start := time.Now()
+	log.Printf("fitToWindow: START")
 
-	// Change ordering type if needed
-	if iv.imageSet.ChangeType != changeType {
-		iv.changeImageOrder(changeType)
-	}
+	// Reset to fit mode - clear any fixed sizing
+	v.currentImage.FillMode = canvas.ImageFillContain
+	v.currentImage.SetMinSize(fyne.NewSize(0, 0))
+	v.zoomLevel = 1.0
+	log.Printf("fitToWindow: properties set (%v)", time.Since(start))
 
-	// Move to next image
-	iv.imageSet.SetPos = (iv.imageSet.SetPos + 1) % len(iv.imageSet.OrderedList)
-	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
+	// Only refresh the container - it will cascade to children
+	// Use the canvas content tree refresh which is faster
+	v.window.Canvas().Content().Refresh()
+	log.Printf("fitToWindow: DONE (%v total)", time.Since(start))
 }
 
-// prevImage moves to the previous image
-func (iv *ImageViewer) prevImage(changeType string) {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
+// setZoom sets the image to a specific zoom level
+func (v *ImageViewer) setZoom(zoom float32) {
+	start := time.Now()
+	log.Printf("setZoom: START zoom=%.2f", zoom)
 
-	// Change ordering type if needed
-	if iv.imageSet.ChangeType != changeType {
-		iv.changeImageOrder(changeType)
-	}
+	v.zoomLevel = zoom
 
-	// Move to previous image
-	iv.imageSet.SetPos--
-	if iv.imageSet.SetPos < 0 {
-		iv.imageSet.SetPos = len(iv.imageSet.OrderedList) - 1
-	}
-	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
+	// Use cached dimensions for fast zoom
+	width := float32(v.currentImgWidth) * zoom
+	height := float32(v.currentImgHeight) * zoom
+
+	// Set to original fill mode and set explicit size
+	v.currentImage.FillMode = canvas.ImageFillOriginal
+	v.currentImage.SetMinSize(fyne.NewSize(width, height))
+	log.Printf("setZoom: properties set (%v)", time.Since(start))
+
+	// Only refresh the container - it will cascade to children
+	v.window.Canvas().Content().Refresh()
+	log.Printf("setZoom: DONE (%v total)", time.Since(start))
 }
 
-// firstImage moves to the first image
-func (iv *ImageViewer) firstImage() {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
+// nextImage advances to the next image based on change type
+func (v *ImageViewer) nextImage(changeType string, skip int) {
+	v.changeType = changeType
 
-	iv.imageSet.SetPos = 0
-	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
-}
-
-// lastImage moves to the last image
-func (iv *ImageViewer) lastImage() {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
-
-	iv.imageSet.SetPos = len(iv.imageSet.OrderedList) - 1
-	iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
-}
-
-// changeImageOrder changes the ordering of images
-func (iv *ImageViewer) changeImageOrder(changeType string) {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
-
-	// Save current image
-	currentImage := iv.imageSet.OrderedList[iv.imageSet.SetPos]
-
-	// Change ordering
 	switch changeType {
 	case "ordered":
-		sort.Strings(iv.imageSet.OrderedList)
-	case "shuffled":
-		// First sort
-		sort.Strings(iv.imageSet.OrderedList)
-
-		// Then shuffle in groups of 20
-		for i := 0; i < len(iv.imageSet.OrderedList); i++ {
-			var swapIndex int
-			if i < len(iv.imageSet.OrderedList)-20 {
-				swapIndex = i + rand.Intn(20) + 1
-			} else {
-				swapIndex = rand.Intn(len(iv.imageSet.OrderedList) - i)
-			}
-			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[swapIndex] =
-				iv.imageSet.OrderedList[swapIndex], iv.imageSet.OrderedList[i]
+		newIndex := v.currentIndex + skip
+		if newIndex >= len(v.images) {
+			newIndex = len(v.images) - 1
 		}
+		v.loadImage(newIndex)
+
 	case "random":
-		// Full randomization
-		rand.Shuffle(len(iv.imageSet.OrderedList), func(i, j int) {
-			iv.imageSet.OrderedList[i], iv.imageSet.OrderedList[j] =
-				iv.imageSet.OrderedList[j], iv.imageSet.OrderedList[i]
-		})
-	}
-
-	// Find current image in new ordering
-	for i, img := range iv.imageSet.OrderedList {
-		if img == currentImage {
-			iv.imageSet.SetPos = i
-			break
+		if len(v.images) > 1 {
+			newIndex := rand.Intn(len(v.images))
+			v.loadImage(newIndex)
 		}
+
+	case "shuffled":
+		if v.shuffledOrder == nil {
+			v.initShuffle()
+		}
+		v.shuffledIndex++
+		if v.shuffledIndex >= len(v.shuffledOrder) {
+			v.shuffledIndex = 0
+		}
+		v.loadImage(v.shuffledOrder[v.shuffledIndex])
 	}
-
-	iv.imageSet.ChangeType = changeType
 }
 
-// scrollUp scrolls the image up
-func (iv *ImageViewer) scrollUp() {
-	iv.scrollView.Offset.Y -= float32(iv.scrollPix)
-	iv.scrollView.Refresh()
+// prevImage goes to the previous image based on change type
+func (v *ImageViewer) prevImage(changeType string, skip int) {
+	v.changeType = changeType
+
+	switch changeType {
+	case "ordered":
+		newIndex := v.currentIndex - skip
+		if newIndex < 0 {
+			newIndex = 0
+		}
+		v.loadImage(newIndex)
+
+	case "random":
+		if len(v.images) > 1 {
+			newIndex := rand.Intn(len(v.images))
+			v.loadImage(newIndex)
+		}
+
+	case "shuffled":
+		if v.shuffledOrder == nil {
+			v.initShuffle()
+		}
+		v.shuffledIndex--
+		if v.shuffledIndex < 0 {
+			v.shuffledIndex = len(v.shuffledOrder) - 1
+		}
+		v.loadImage(v.shuffledOrder[v.shuffledIndex])
+	}
 }
 
-// scrollDown scrolls the image down
-func (iv *ImageViewer) scrollDown() {
-	iv.scrollView.Offset.Y += float32(iv.scrollPix)
-	iv.scrollView.Refresh()
+// initShuffle creates a shuffled order of indices
+func (v *ImageViewer) initShuffle() {
+	v.shuffledOrder = make([]int, len(v.images))
+	for i := range v.shuffledOrder {
+		v.shuffledOrder[i] = i
+	}
+	rand.Shuffle(len(v.shuffledOrder), func(i, j int) {
+		v.shuffledOrder[i], v.shuffledOrder[j] = v.shuffledOrder[j], v.shuffledOrder[i]
+	})
+	v.shuffledIndex = 0
 }
 
-// scrollLeft scrolls the image left
-func (iv *ImageViewer) scrollLeft() {
-	iv.scrollView.Offset.X -= float32(iv.scrollPix)
-	iv.scrollView.Refresh()
-}
-
-// scrollRight scrolls the image right
-func (iv *ImageViewer) scrollRight() {
-	iv.scrollView.Offset.X += float32(iv.scrollPix)
-	iv.scrollView.Refresh()
-}
-
-// zoomIn increases zoom level
-func (iv *ImageViewer) zoomIn() {
-	iv.imgZoom *= 1.1
-	iv.updateZoom()
-}
-
-// zoomOut decreases zoom level
-func (iv *ImageViewer) zoomOut() {
-	iv.imgZoom *= 0.9
-	iv.updateZoom()
-}
-
-// zoomTo sets a specific zoom level
-func (iv *ImageViewer) zoomTo(zoom float64) {
-	iv.imgZoom = zoom
-	iv.updateZoom()
-}
-
-// zoomOneToOne sets zoom to 1:1
-func (iv *ImageViewer) zoomOneToOne() {
-	iv.imgZoom = 1.0
-	iv.updateZoom()
-}
-
-// fitToWindow resizes the image to fit the window
-func (iv *ImageViewer) fitToWindow() {
-	iv.imageCanvas.FillMode = canvas.ImageFillContain
-	iv.imageCanvas.Refresh()
-}
-
-// updateZoom applies the current zoom level
-func (iv *ImageViewer) updateZoom() {
-	// Get the original image size if available
-	if iv.imageCanvas == nil {
+// deleteCurrentImage moves the current image to trash
+func (v *ImageViewer) deleteCurrentImage() {
+	if v.currentIndex >= len(v.images) {
 		return
 	}
 
-	// Get current image size and calculate zoomed size
-	size := iv.imageCanvas.Size()
-	if size.Width == 0 || size.Height == 0 {
-		// If image size is not yet available, use a default size
-		size = fyne.NewSize(800, 600)
+	imgPath := v.images[v.currentIndex]
+	filename := filepath.Base(imgPath)
+	trashPath := filepath.Join(v.trashDir, filename)
+
+	// Check if file already exists in trash
+	if _, err := os.Stat(trashPath); err == nil {
+		v.showFeedback(fmt.Sprintf("File already exists in trash: %s", filename), 3*time.Second)
+		return
 	}
 
-	// Apply zoom to image
-	zoomedSize := fyne.NewSize(
-		float32(float64(size.Width)*iv.imgZoom),
-		float32(float64(size.Height)*iv.imgZoom),
-	)
+	// Move to trash
+	err := os.Rename(imgPath, trashPath)
+	if err != nil {
+		v.showFeedback(fmt.Sprintf("Error moving to trash: %v", err), 3*time.Second)
+		log.Printf("Error moving %s to trash: %v\n", imgPath, err)
+		return
+	}
 
-	iv.imageCanvas.SetMinSize(zoomedSize)
-	iv.scrollView.Refresh()
-}
+	v.showFeedback(fmt.Sprintf("Moved to trash: %s", filename), 2*time.Second)
+	log.Printf("Deleted (moved to trash): %s\n", imgPath)
 
-// toggleFullscreen switches between windowed and fullscreen modes
-func (iv *ImageViewer) toggleFullscreen() {
-	if iv.fullscreen {
-		iv.window.SetFullScreen(false)
-		iv.fullscreen = false
+	// Remove from list
+	v.images = append(v.images[:v.currentIndex], v.images[v.currentIndex+1:]...)
+
+	// Load next image or previous if at end
+	if v.currentIndex >= len(v.images) {
+		v.currentIndex = len(v.images) - 1
+	}
+	if len(v.images) > 0 {
+		v.loadImage(v.currentIndex)
 	} else {
-		iv.lastSize = iv.window.Content().Size()
-		iv.window.SetFullScreen(true)
-		iv.fullscreen = true
+		v.showFeedback("No more images", 3*time.Second)
 	}
 }
 
-// toggleSlideshow toggles the slideshow mode
-func (iv *ImageViewer) toggleSlideshow() {
-	if iv.slideshowActive {
+// showFeedback displays a temporary message to the user
+func (v *ImageViewer) showFeedback(message string, duration time.Duration) {
+	v.feedbackLabel.SetText(message)
+	v.feedbackLabel.Show()
+
+	go func() {
+		time.Sleep(duration)
+		// Use fyne.Do to ensure UI operations run on the main thread
+		fyne.Do(func() {
+			v.feedbackLabel.Hide()
+		})
+	}()
+}
+
+// toggleSlideshow starts or stops the slideshow
+func (v *ImageViewer) toggleSlideshow(interval time.Duration) {
+	if v.slideshow {
 		// Stop slideshow
-		if iv.slideshowTimer != nil {
-			iv.slideshowTimer.Stop()
-		}
-		iv.slideshowActive = false
-		iv.showInfo("Slideshow stopped")
+		v.slideshow = false
+		v.slideshowStop <- true
+		v.showFeedback("Slideshow stopped", 1*time.Second)
 	} else {
 		// Start slideshow
-		iv.slideshowActive = true
-		interval := time.Duration(iv.config.UI.SlideshowInterval) * time.Second
-		iv.showInfo(fmt.Sprintf("Slideshow started (interval: %d seconds)", iv.config.UI.SlideshowInterval))
+		v.slideshow = true
+		v.showFeedback(fmt.Sprintf("Slideshow started (%v interval)", interval), 2*time.Second)
 
-		// Run immediately then schedule
-		iv.nextImage(iv.imageSet.ChangeType)
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
 
-		iv.slideshowTimer = time.AfterFunc(interval, func() {
-			// This runs in a goroutine already
-			if iv.slideshowActive {
-				// Need to run on main thread, but there's no clean way
-				// to do this in Fyne without QueueEvent, so we'll just
-				// make this synchronous for now
-				iv.nextImage(iv.imageSet.ChangeType)
-				iv.toggleSlideshow() // Re-schedule
+			for {
+				select {
+				case <-ticker.C:
+					v.nextImage(v.changeType, 1)
+				case <-v.slideshowStop:
+					return
+				}
 			}
-		})
+		}()
 	}
 }
 
-// moveImage moves the current image to a destination directory
-func (iv *ImageViewer) moveImage(destDir string) {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
+// updateScrollSpeed calculates progressive scrolling speed
+func (v *ImageViewer) updateScrollSpeed() float32 {
+	now := time.Now()
+	timeSinceLastScroll := now.Sub(v.lastScrollTime)
 
-	srcPath := iv.imageSet.OrderedList[iv.imageSet.SetPos]
-	destPath := filepath.Join(destDir, filepath.Base(srcPath))
-
-	// Check if destination exists
-	if _, err := os.Stat(destPath); err == nil {
-		iv.showInfo(fmt.Sprintf("Image already exists in %s", destDir))
-		return
-	}
-
-	// Move the file
-	if err := os.Rename(srcPath, destPath); err != nil {
-		iv.showInfo(fmt.Sprintf("Error moving image: %v", err))
-		return
-	}
-
-	// Remove from list and load next image
-	iv.imageSet.OrderedList = append(
-		iv.imageSet.OrderedList[:iv.imageSet.SetPos],
-		iv.imageSet.OrderedList[iv.imageSet.SetPos+1:]...,
-	)
-
-	if len(iv.imageSet.OrderedList) > 0 {
-		if iv.imageSet.SetPos >= len(iv.imageSet.OrderedList) {
-			iv.imageSet.SetPos = 0
-		}
-		iv.loadImage(iv.imageSet.OrderedList[iv.imageSet.SetPos])
-	}
-
-	iv.showInfo(fmt.Sprintf("Moved to %s", destDir))
-}
-
-// copyImage copies the current image to a destination directory
-func (iv *ImageViewer) copyImage(destDir string) {
-	if len(iv.imageSet.OrderedList) == 0 {
-		return
-	}
-
-	srcPath := iv.imageSet.OrderedList[iv.imageSet.SetPos]
-	destPath := filepath.Join(destDir, filepath.Base(srcPath))
-
-	// Check if destination exists
-	if _, err := os.Stat(destPath); err == nil {
-		iv.showInfo(fmt.Sprintf("Image already exists in %s", destDir))
-		return
-	}
-
-	// Copy the file
-	srcFile, err := os.ReadFile(srcPath)
-	if err != nil {
-		iv.showInfo(fmt.Sprintf("Error reading image: %v", err))
-		return
-	}
-
-	if err := os.WriteFile(destPath, srcFile, 0644); err != nil {
-		iv.showInfo(fmt.Sprintf("Error copying image: %v", err))
-		return
-	}
-
-	iv.showInfo(fmt.Sprintf("Copied to %s", destDir))
-}
-
-// handleMoveCommand processes the second key of a move command
-func (iv *ImageViewer) handleMoveCommand(key string) {
-	destKey := fmt.Sprintf("dest-%s", key)
-	if dest, ok := iv.config.ReadOnlySettings[destKey]; ok {
-		expandedPath := strings.Replace(dest, "~", os.Getenv("HOME"), 1)
-		iv.moveImage(expandedPath)
+	// If it's been longer than the reset delay, reset to initial speed
+	if timeSinceLastScroll > v.scrollResetDelay {
+		v.scrollPixels = 10.0
 	} else {
-		iv.showInfo(fmt.Sprintf("No destination defined for key '%s'", key))
-	}
-}
-
-// handleCopyCommand processes the second key of a copy command
-func (iv *ImageViewer) handleCopyCommand(key string) {
-	destKey := fmt.Sprintf("dest-%s", key)
-	if dest, ok := iv.config.ReadOnlySettings[destKey]; ok {
-		expandedPath := strings.Replace(dest, "~", os.Getenv("HOME"), 1)
-		iv.copyImage(expandedPath)
-	} else {
-		iv.showInfo(fmt.Sprintf("No destination defined for key '%s'", key))
-	}
-}
-
-// showInfo displays information in the info label
-func (iv *ImageViewer) showInfo(text string) {
-	iv.infoLabel.SetText(text)
-	iv.infoLabel.Show()
-
-	// Auto-hide after a delay
-	go func() {
-		time.Sleep(2 * time.Second)
-		// Run on main thread
-		iv.window.Canvas().Refresh(iv.infoLabel)
-		iv.clearInfoLabel()
-	}()
-}
-
-// clearInfoLabel hides the info label
-func (iv *ImageViewer) clearInfoLabel() {
-	iv.infoLabel.SetText("")
-	iv.infoLabel.Hide()
-}
-
-// showDestinations shows available destinations in the giant info label
-func (iv *ImageViewer) showDestinations() {
-	var destinations []string
-	for key, value := range iv.config.ReadOnlySettings {
-		if strings.HasPrefix(key, "dest-") {
-			destinations = append(destinations, fmt.Sprintf("%s: %s", key[5:], value))
+		// Increase scroll speed by 2 pixels, max out at reasonable limit
+		v.scrollPixels += 2.0
+		if v.scrollPixels > 100.0 {
+			v.scrollPixels = 100.0
 		}
 	}
 
-	iv.giantInfo.SetText(fmt.Sprintf("Available destinations:\n%s", strings.Join(destinations, "\n")))
-	iv.giantInfo.Show()
-
-	// Auto-hide after a delay
-	go func() {
-		time.Sleep(2 * time.Second)
-		// Run on main thread
-		iv.window.Canvas().Refresh(iv.giantInfo)
-		iv.clearGiantInfo()
-	}()
+	v.lastScrollTime = now
+	return v.scrollPixels
 }
 
-// clearGiantInfo hides the giant info label
-func (iv *ImageViewer) clearGiantInfo() {
-	iv.giantInfo.SetText("")
-	iv.giantInfo.Hide()
+// handleKeyPress handles special key presses (arrows, delete, etc.)
+func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
+	// Don't log every keypress - causes slowdown
+	// log.Printf("Key pressed: %v\n", key.Name)
+
+	switch key.Name {
+	case fyne.KeyLeft:
+		scrollDist := v.updateScrollSpeed()
+		newOffset := v.scroll.Offset.X - scrollDist
+		if newOffset < 0 {
+			newOffset = 0
+		}
+		v.scroll.ScrollToOffset(fyne.NewPos(newOffset, v.scroll.Offset.Y))
+
+	case fyne.KeyRight:
+		scrollDist := v.updateScrollSpeed()
+		maxX := v.currentImage.Size().Width - v.scroll.Size().Width
+		if maxX < 0 {
+			maxX = 0
+		}
+		newOffset := v.scroll.Offset.X + scrollDist
+		if newOffset > maxX {
+			newOffset = maxX
+		}
+		v.scroll.ScrollToOffset(fyne.NewPos(newOffset, v.scroll.Offset.Y))
+
+	case fyne.KeyUp:
+		scrollDist := v.updateScrollSpeed()
+		newOffset := v.scroll.Offset.Y - scrollDist
+		if newOffset < 0 {
+			newOffset = 0
+		}
+		v.scroll.ScrollToOffset(fyne.NewPos(v.scroll.Offset.X, newOffset))
+
+	case fyne.KeyDown:
+		scrollDist := v.updateScrollSpeed()
+		maxY := v.currentImage.Size().Height - v.scroll.Size().Height
+		if maxY < 0 {
+			maxY = 0
+		}
+		newOffset := v.scroll.Offset.Y + scrollDist
+		if newOffset > maxY {
+			newOffset = maxY
+		}
+		v.scroll.ScrollToOffset(fyne.NewPos(v.scroll.Offset.X, newOffset))
+
+	case fyne.KeyDelete, fyne.KeyBackspace:
+		if key.Name == fyne.KeyBackspace {
+			// Check for Cmd/Meta modifier
+			if desk, ok := v.window.Canvas().(desktop.Canvas); ok {
+				_ = desk // On macOS, Cmd+Backspace is delete
+			}
+		}
+		v.deleteCurrentImage()
+
+	case fyne.KeyPageDown:
+		v.nextImage("ordered", 1)
+
+	case fyne.KeyPageUp:
+		v.prevImage("ordered", 1)
+
+	case fyne.KeyHome:
+		v.loadImage(0)
+
+	case fyne.KeyEnd:
+		v.loadImage(len(v.images) - 1)
+	}
+}
+
+// handleRunePress handles character key presses
+func (v *ImageViewer) handleRunePress(r rune) {
+	start := time.Now()
+	log.Printf("handleRunePress: START key=%c", r)
+
+	switch r {
+	// Navigation
+	case '\'', '"':
+		skip := 1
+		if r == '"' { // Shift+' is "
+			skip = 10
+		}
+		v.nextImage("ordered", skip)
+
+	case ';', ':':
+		skip := 1
+		if r == ':' { // Shift+; is :
+			skip = 10
+		}
+		v.prevImage("ordered", skip)
+
+	case '.':
+		v.nextImage("random", 1)
+
+	case ',':
+		v.prevImage("random", 1)
+
+	case ']':
+		v.nextImage("shuffled", 1)
+
+	case '[':
+		v.prevImage("shuffled", 1)
+
+	// Zoom
+	case '-', '_':
+		v.zoomLevel *= 0.9
+		v.setZoom(v.zoomLevel)
+		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", v.zoomLevel*100), 1*time.Second)
+
+	case '=', '+':
+		v.zoomLevel *= 1.1
+		v.setZoom(v.zoomLevel)
+		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", v.zoomLevel*100), 1*time.Second)
+
+	case 'z', '1':
+		v.setZoom(1.0)
+		log.Printf("handleRunePress: after setZoom (%v)", time.Since(start))
+		v.showFeedback("Zoom: 100% (1:1)", 1*time.Second)
+		log.Printf("handleRunePress: after showFeedback (%v)", time.Since(start))
+
+	case 'x':
+		v.fitToWindow()
+		log.Printf("handleRunePress: after fitToWindow (%v)", time.Since(start))
+		v.showFeedback("Fit to window", 1*time.Second)
+		log.Printf("handleRunePress: after showFeedback (%v)", time.Since(start))
+
+	case '2':
+		v.setZoom(2.0)
+		v.showFeedback("Zoom: 200%", 1*time.Second)
+
+	case '3':
+		v.setZoom(3.0)
+		v.showFeedback("Zoom: 300%", 1*time.Second)
+
+	case '4':
+		v.setZoom(4.0)
+		v.showFeedback("Zoom: 400%", 1*time.Second)
+
+	// Slideshow
+	case 's', 'S':
+		interval := 20 * time.Second
+		if r == 'S' {
+			interval = 40 * time.Second
+		}
+		v.toggleSlideshow(interval)
+
+	// Quit
+	case 'q', 'Q':
+		v.app.Quit()
+	}
 }
