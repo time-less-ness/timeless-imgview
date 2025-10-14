@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -52,6 +53,14 @@ type ImageViewer struct {
 	preloadChan     chan int
 	// Debug profiling
 	debugProfile   bool
+	// Remembered scroll position as percentage (0.0 to 1.0)
+	rememberedScrollX float32
+	rememberedScrollY float32
+	// Track last known scroll offset to detect mouse/trackpad scrolling
+	lastScrollOffsetX float32
+	lastScrollOffsetY float32
+	// Flag to temporarily disable scroll capture during zoom operations
+	disableScrollCapture bool
 }
 
 // imageInfo holds cached image data
@@ -97,6 +106,8 @@ func main() {
 		imageCache:       make(map[string]*imageInfo),
 		preloadChan:      make(chan int, 10),
 		debugProfile:     debugProfile,
+		rememberedScrollX: 0.5, // Start at center
+		rememberedScrollY: 0.5,
 	}
 
 	if viewer.debugProfile {
@@ -105,6 +116,9 @@ func main() {
 
 	// Start preloader goroutine
 	go viewer.preloader()
+
+	// Start scroll position monitor for mouse/trackpad scrolling
+	go viewer.scrollMonitor()
 
 	// Collect images from command line
 	viewer.collectImages(args)
@@ -214,8 +228,12 @@ func (v *ImageViewer) setupUI() {
 	v.feedbackLabel.TextStyle = fyne.TextStyle{Bold: true}
 	v.feedbackLabel.Hide()
 
-	// Create overlay with image and feedback
+	// Create black background
+	background := canvas.NewRectangle(color.Black)
+
+	// Create overlay with black background, image, and feedback
 	content := container.NewStack(
+		background,
 		v.scroll,
 		container.NewVBox(
 			widget.NewLabel(""), // spacer
@@ -224,6 +242,39 @@ func (v *ImageViewer) setupUI() {
 	)
 
 	v.window.SetContent(content)
+}
+
+// scrollMonitor periodically checks if scroll position changed (mouse/trackpad)
+func (v *ImageViewer) scrollMonitor() {
+	ticker := time.NewTicker(100 * time.Millisecond) // Check 10 times per second
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if v.scroll == nil {
+			continue
+		}
+
+		// Don't capture if temporarily disabled
+		if v.disableScrollCapture {
+			continue
+		}
+
+		// Don't capture position when in fit-to-window mode
+		if v.currentImage != nil && v.currentImage.FillMode == canvas.ImageFillContain {
+			continue
+		}
+
+		currentX := v.scroll.Offset.X
+		currentY := v.scroll.Offset.Y
+
+		// Check if scroll position changed
+		if currentX != v.lastScrollOffsetX || currentY != v.lastScrollOffsetY {
+			v.lastScrollOffsetX = currentX
+			v.lastScrollOffsetY = currentY
+			// Capture the new position
+			v.captureScrollPosition()
+		}
+	}
 }
 
 // preloader runs in background and preloads adjacent images
@@ -366,12 +417,17 @@ func (v *ImageViewer) loadImage(index int) {
 		}
 	}
 
-	// Reset zoom and fit to window
-	fitStart := time.Now()
-	v.zoomLevel = 1.0
-	v.fitToWindow()
+	// Apply current zoom level to the new image
+	applyZoomStart := time.Now()
+	if v.currentImage.FillMode == canvas.ImageFillContain {
+		// Currently in fit-to-window mode, maintain that
+		v.fitToWindow()
+	} else {
+		// Currently in a zoom mode, maintain that zoom level
+		v.setZoom(v.zoomLevel)
+	}
 	if v.debugProfile {
-		log.Printf("loadImage: fitToWindow completed (%v since fit start, %v since overall start)", time.Since(fitStart), time.Since(overallStart))
+		log.Printf("loadImage: zoom applied (%v since zoom start, %v since overall start)", time.Since(applyZoomStart), time.Since(overallStart))
 	}
 
 	// Update window title
@@ -412,11 +468,153 @@ func (v *ImageViewer) fitToWindow() {
 		log.Printf("fitToWindow: properties set (%v)", time.Since(propStart))
 	}
 
-	// Refresh just the image widget, not the entire content tree
+	// Refresh both the image and force a canvas refresh
 	refreshStart := time.Now()
 	v.currentImage.Refresh()
+	v.scroll.Refresh()
+	v.window.Canvas().Refresh(v.currentImage)
 	if v.debugProfile {
-		log.Printf("fitToWindow: Image refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
+		log.Printf("fitToWindow: Refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
+	}
+}
+
+// captureScrollPosition saves the current scroll position as a percentage
+func (v *ImageViewer) captureScrollPosition() {
+	if v.debugProfile {
+		log.Printf("captureScrollPosition: called, disableScrollCapture=%v, FillMode=%v", v.disableScrollCapture, v.currentImage.FillMode)
+	}
+
+	// Don't capture if temporarily disabled (during zoom operations)
+	if v.disableScrollCapture {
+		if v.debugProfile {
+			log.Printf("captureScrollPosition: skipping, capture disabled")
+		}
+		return
+	}
+
+	// Don't capture position when in fit-to-window mode
+	if v.currentImage.FillMode == canvas.ImageFillContain {
+		if v.debugProfile {
+			log.Printf("captureScrollPosition: skipping, in fit-to-window mode")
+		}
+		return
+	}
+
+	// Calculate the rendered image size based on zoom level
+	// Don't use v.currentImage.Size() as it may not be updated yet after zoom
+	imgWidth := float32(v.currentImgWidth) * v.zoomLevel
+	imgHeight := float32(v.currentImgHeight) * v.zoomLevel
+	scrollSize := v.scroll.Size()
+
+	// Avoid divide by zero
+	if imgWidth == 0 || imgHeight == 0 {
+		return
+	}
+
+	if imgWidth > scrollSize.Width {
+		// Image is wider than viewport - calculate X percentage
+		centerX := v.scroll.Offset.X + scrollSize.Width/2
+		v.rememberedScrollX = centerX / imgWidth
+	} else {
+		v.rememberedScrollX = 0.5 // Center if image fits
+	}
+
+	if imgHeight > scrollSize.Height {
+		// Image is taller than viewport - calculate Y percentage
+		centerY := v.scroll.Offset.Y + scrollSize.Height/2
+		v.rememberedScrollY = centerY / imgHeight
+	} else {
+		v.rememberedScrollY = 0.5 // Center if image fits
+	}
+
+	if v.debugProfile {
+		log.Printf("captureScrollPosition: saved position %.2f%%, %.2f%% (imgSize: %.0fx%.0f, scrollSize: %.0fx%.0f, offset: %.0f,%.0f)",
+			v.rememberedScrollX*100, v.rememberedScrollY*100,
+			imgWidth, imgHeight, scrollSize.Width, scrollSize.Height,
+			v.scroll.Offset.X, v.scroll.Offset.Y)
+	}
+}
+
+// restoreScrollPosition restores the scroll position based on remembered percentages
+func (v *ImageViewer) restoreScrollPosition() {
+	// Disable scroll capture during restore to prevent capturing intermediate positions
+	v.disableScrollCapture = true
+
+	// Need to wait for layout to settle after size changes
+	go func() {
+		// Wait for the UI to update
+		time.Sleep(50 * time.Millisecond)
+
+		// Use fyne.Do to ensure we're on the UI thread
+		fyne.Do(func() {
+			v.doRestoreScrollPosition()
+
+			// Re-enable scroll capture after restore completes
+			// Wait a bit more to ensure scroll position has fully settled
+			time.Sleep(50 * time.Millisecond)
+			v.disableScrollCapture = false
+		})
+	}()
+}
+
+// doRestoreScrollPosition performs the actual scroll restoration
+func (v *ImageViewer) doRestoreScrollPosition() {
+	// Calculate the offset needed to center the remembered percentage point
+	imgSize := v.currentImage.Size()
+	scrollSize := v.scroll.Size()
+
+	// Avoid issues with zero sizes
+	if imgSize.Width == 0 || imgSize.Height == 0 {
+		if v.debugProfile {
+			log.Printf("doRestoreScrollPosition: skipping, image size is zero")
+		}
+		return
+	}
+
+	// Calculate where to scroll so remembered point is at viewport center
+	targetX := v.rememberedScrollX * imgSize.Width
+	targetY := v.rememberedScrollY * imgSize.Height
+
+	if v.debugProfile {
+		log.Printf("doRestoreScrollPosition: targetX=%.2f (%.2f%% * %.0f), targetY=%.2f (%.2f%% * %.0f)",
+			targetX, v.rememberedScrollX*100, imgSize.Width,
+			targetY, v.rememberedScrollY*100, imgSize.Height)
+	}
+
+	// Adjust for viewport center
+	offsetX := targetX - scrollSize.Width/2
+	offsetY := targetY - scrollSize.Height/2
+
+	if v.debugProfile {
+		log.Printf("doRestoreScrollPosition: before clamp offsetX=%.0f, offsetY=%.0f", offsetX, offsetY)
+	}
+
+	// Clamp to valid scroll range
+	maxX := imgSize.Width - scrollSize.Width
+	maxY := imgSize.Height - scrollSize.Height
+
+	if offsetX < 0 {
+		offsetX = 0
+	}
+	if offsetX > maxX {
+		offsetX = maxX
+	}
+	if offsetY < 0 {
+		offsetY = 0
+	}
+	if offsetY > maxY {
+		offsetY = maxY
+	}
+
+	if v.debugProfile {
+		log.Printf("doRestoreScrollPosition: calling ScrollToOffset(%.0f, %.0f)", offsetX, offsetY)
+	}
+
+	v.scroll.ScrollToOffset(fyne.NewPos(offsetX, offsetY))
+
+	if v.debugProfile {
+		log.Printf("doRestoreScrollPosition: after ScrollToOffset, actual offset is %.0f, %.0f",
+			v.scroll.Offset.X, v.scroll.Offset.Y)
 	}
 }
 
@@ -424,29 +622,116 @@ func (v *ImageViewer) fitToWindow() {
 func (v *ImageViewer) setZoom(zoom float32) {
 	start := time.Now()
 	if v.debugProfile {
-		log.Printf("setZoom: START zoom=%.2f", zoom)
+		log.Printf("setZoom: START zoom=%.2f, FillMode=%v, current offset: %.0f, %.0f",
+			zoom, v.currentImage.FillMode, v.scroll.Offset.X, v.scroll.Offset.Y)
 	}
 
+	// Save old zoom level for position capture
+	oldZoomLevel := v.zoomLevel
+
+	// Update zoom level FIRST
 	v.zoomLevel = zoom
+
+	// Capture current position BEFORE changing image size (if not in fit-to-window mode)
+	// We need to capture using the OLD zoom level
+	if v.currentImage.FillMode != canvas.ImageFillContain {
+		if v.debugProfile {
+			log.Printf("setZoom: capturing position before zoom (using old zoom %.2f)", oldZoomLevel)
+		}
+		// Temporarily restore old zoom for capture
+		v.zoomLevel = oldZoomLevel
+		v.captureScrollPosition()
+		v.zoomLevel = zoom // Restore new zoom
+	} else {
+		if v.debugProfile {
+			log.Printf("setZoom: NOT capturing (in fit-to-window mode)")
+		}
+	}
+
+	// Disable scroll capture during zoom operation
+	v.disableScrollCapture = true
 
 	// Use cached dimensions for fast zoom
 	width := float32(v.currentImgWidth) * zoom
 	height := float32(v.currentImgHeight) * zoom
 
-	// Set to original fill mode and set explicit size
+	// Set to stretch mode with explicit size
+	// FillMode Original doesn't respect size, so we use Stretch to force the size
 	propStart := time.Now()
-	v.currentImage.FillMode = canvas.ImageFillOriginal
-	v.currentImage.SetMinSize(fyne.NewSize(width, height))
+	v.currentImage.FillMode = canvas.ImageFillStretch
+	newSize := fyne.NewSize(width, height)
+	v.currentImage.SetMinSize(newSize)
+	v.currentImage.Resize(newSize)
 	if v.debugProfile {
-		log.Printf("setZoom: properties set (%v)", time.Since(propStart))
+		log.Printf("setZoom: properties set to %.0fx%.0f (%v)", width, height, time.Since(propStart))
 	}
 
-	// Refresh just the image widget
+	// Refresh the image widget, scroll container, and canvas
 	refreshStart := time.Now()
 	v.currentImage.Refresh()
+	v.scroll.Refresh()
+	v.window.Canvas().Refresh(v.currentImage)
 	if v.debugProfile {
 		log.Printf("setZoom: Image refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
 	}
+
+	// Restore scroll position after a minimal delay to let layout settle
+	// Use async to avoid blocking, but make it fast
+	go func() {
+		time.Sleep(5 * time.Millisecond) // Minimal delay
+
+		fyne.Do(func() {
+			scrollSize := v.scroll.Size()
+
+			if v.debugProfile {
+				log.Printf("setZoom: after delay, remembered position is %.2f%%, %.2f%%",
+					v.rememberedScrollX*100, v.rememberedScrollY*100)
+				log.Printf("setZoom: image size=%.0fx%.0f, scroll size=%.0fx%.0f",
+					width, height, scrollSize.Width, scrollSize.Height)
+			}
+
+			targetX := v.rememberedScrollX * width
+			targetY := v.rememberedScrollY * height
+			offsetX := targetX - scrollSize.Width/2
+			offsetY := targetY - scrollSize.Height/2
+
+			// Clamp to valid range
+			maxX := width - scrollSize.Width
+			maxY := height - scrollSize.Height
+			if offsetX < 0 {
+				offsetX = 0
+			}
+			if offsetX > maxX {
+				offsetX = maxX
+			}
+			if offsetY < 0 {
+				offsetY = 0
+			}
+			if offsetY > maxY {
+				offsetY = maxY
+			}
+
+			if v.debugProfile {
+				log.Printf("setZoom: calling ScrollToOffset(%.0f, %.0f) for %.2f%%, %.2f%%",
+					offsetX, offsetY, v.rememberedScrollX*100, v.rememberedScrollY*100)
+				log.Printf("setZoom: current offset before scroll: %.0f, %.0f", v.scroll.Offset.X, v.scroll.Offset.Y)
+			}
+
+			v.scroll.ScrollToOffset(fyne.NewPos(offsetX, offsetY))
+
+			if v.debugProfile {
+				log.Printf("setZoom: current offset after scroll: %.0f, %.0f", v.scroll.Offset.X, v.scroll.Offset.Y)
+			}
+
+			// Re-enable scroll capture after position is set
+			// Wait a bit to ensure position has fully settled
+			time.Sleep(50 * time.Millisecond)
+			v.disableScrollCapture = false
+			if v.debugProfile {
+				log.Printf("setZoom: re-enabled scroll capture")
+			}
+		})
+	}()
 }
 
 // ensureNavOrder creates navigation order if needed and updates navIndex to current position
@@ -688,6 +973,7 @@ func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
 			newOffset = 0
 		}
 		v.scroll.ScrollToOffset(fyne.NewPos(newOffset, v.scroll.Offset.Y))
+		v.captureScrollPosition()
 
 	case fyne.KeyRight:
 		scrollDist := v.updateScrollSpeed()
@@ -700,6 +986,7 @@ func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
 			newOffset = maxX
 		}
 		v.scroll.ScrollToOffset(fyne.NewPos(newOffset, v.scroll.Offset.Y))
+		v.captureScrollPosition()
 
 	case fyne.KeyUp:
 		scrollDist := v.updateScrollSpeed()
@@ -708,6 +995,7 @@ func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
 			newOffset = 0
 		}
 		v.scroll.ScrollToOffset(fyne.NewPos(v.scroll.Offset.X, newOffset))
+		v.captureScrollPosition()
 
 	case fyne.KeyDown:
 		scrollDist := v.updateScrollSpeed()
@@ -720,6 +1008,7 @@ func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
 			newOffset = maxY
 		}
 		v.scroll.ScrollToOffset(fyne.NewPos(v.scroll.Offset.X, newOffset))
+		v.captureScrollPosition()
 
 	case fyne.KeyDelete, fyne.KeyBackspace:
 		if key.Name == fyne.KeyBackspace {
@@ -781,14 +1070,22 @@ func (v *ImageViewer) handleRunePress(r rune) {
 
 	// Zoom
 	case '-', '_':
-		v.zoomLevel *= 0.9
-		v.setZoom(v.zoomLevel)
-		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", v.zoomLevel*100), 1*time.Second)
+		if v.debugProfile {
+			log.Printf("handleRunePress: ZOOM OUT - current scroll offset: %.0f, %.0f, remembered: %.2f%%, %.2f%%",
+				v.scroll.Offset.X, v.scroll.Offset.Y, v.rememberedScrollX*100, v.rememberedScrollY*100)
+		}
+		newZoom := v.zoomLevel * 0.9
+		v.setZoom(newZoom)
+		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", newZoom*100), 1*time.Second)
 
 	case '=', '+':
-		v.zoomLevel *= 1.1
-		v.setZoom(v.zoomLevel)
-		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", v.zoomLevel*100), 1*time.Second)
+		if v.debugProfile {
+			log.Printf("handleRunePress: ZOOM IN - current scroll offset: %.0f, %.0f, remembered: %.2f%%, %.2f%%",
+				v.scroll.Offset.X, v.scroll.Offset.Y, v.rememberedScrollX*100, v.rememberedScrollY*100)
+		}
+		newZoom := v.zoomLevel * 1.1
+		v.setZoom(newZoom)
+		v.showFeedback(fmt.Sprintf("Zoom: %.0f%%", newZoom*100), 1*time.Second)
 
 	case 'z', '1':
 		v.setZoom(1.0)
