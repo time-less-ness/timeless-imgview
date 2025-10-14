@@ -50,13 +50,15 @@ type ImageViewer struct {
 	// Image preloading cache
 	imageCache      map[string]*imageInfo
 	preloadChan     chan int
+	// Debug profiling
+	debugProfile   bool
 }
 
 // imageInfo holds cached image data
 type imageInfo struct {
-	width  int
-	height int
-	// Could cache decoded image data here too if needed
+	width   int
+	height  int
+	imgData image.Image // Cached decoded image
 }
 
 func main() {
@@ -64,6 +66,17 @@ func main() {
 
 	// Seed random number generator
 	rand.Seed(time.Now().UnixNano())
+
+	// Parse command line arguments
+	var args []string
+	debugProfile := false
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--debug-profile" {
+			debugProfile = true
+		} else {
+			args = append(args, os.Args[i])
+		}
+	}
 
 	// Create app
 	myApp := app.New()
@@ -83,13 +96,18 @@ func main() {
 		scrollResetDelay: 500 * time.Millisecond,
 		imageCache:       make(map[string]*imageInfo),
 		preloadChan:      make(chan int, 10),
+		debugProfile:     debugProfile,
+	}
+
+	if viewer.debugProfile {
+		log.Printf("Debug profiling enabled")
 	}
 
 	// Start preloader goroutine
 	go viewer.preloader()
 
 	// Collect images from command line
-	viewer.collectImages(os.Args[1:])
+	viewer.collectImages(args)
 
 	if len(viewer.images) == 0 {
 		log.Println("No images found to display")
@@ -253,36 +271,54 @@ func (v *ImageViewer) preloader() {
 			}
 
 			// Load and cache dimensions
+			start := time.Now()
 			if info := v.loadImageInfo(imgPath); info != nil {
 				v.imageCache[imgPath] = info
-				log.Printf("Preloaded (%s): %s [%dx%d]\n", v.changeType, filepath.Base(imgPath), info.width, info.height)
+				if v.debugProfile {
+					log.Printf("Preloaded (%s): %s [%dx%d] in %v\n", v.changeType, filepath.Base(imgPath), info.width, info.height, time.Since(start))
+				}
 			}
 		}
 	}
 }
 
-// loadImageInfo loads image dimensions without keeping the decoded data
+// loadImageInfo loads image dimensions and decoded data
 func (v *ImageViewer) loadImageInfo(path string) *imageInfo {
+	start := time.Now()
 	file, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer file.Close()
 
+	if v.debugProfile {
+		log.Printf("loadImageInfo: File opened for %s (%v)", filepath.Base(path), time.Since(start))
+	}
+
+	decodeStart := time.Now()
 	img, _, err := image.Decode(file)
 	if err != nil {
 		return nil
 	}
+	if v.debugProfile {
+		log.Printf("loadImageInfo: Image decoded for %s (%v since decode start, %v total)", filepath.Base(path), time.Since(decodeStart), time.Since(start))
+	}
 
 	bounds := img.Bounds()
 	return &imageInfo{
-		width:  bounds.Dx(),
-		height: bounds.Dy(),
+		width:   bounds.Dx(),
+		height:  bounds.Dy(),
+		imgData: img,
 	}
 }
 
 // loadImage loads and displays the image at the given index
 func (v *ImageViewer) loadImage(index int) {
+	overallStart := time.Now()
+	if v.debugProfile {
+		log.Printf("loadImage: START index=%d", index)
+	}
+
 	if index < 0 || index >= len(v.images) {
 		return
 	}
@@ -291,16 +327,22 @@ func (v *ImageViewer) loadImage(index int) {
 	imgPath := v.images[index]
 
 	// Check if dimensions are cached
+	dimStart := time.Now()
 	if info, exists := v.imageCache[imgPath]; exists {
 		v.currentImgWidth = info.width
 		v.currentImgHeight = info.height
-		log.Printf("Using cached dimensions for %s [%dx%d]\n", filepath.Base(imgPath), info.width, info.height)
+		if v.debugProfile {
+			log.Printf("loadImage: Using cached dimensions for %s [%dx%d] (%v)\n", filepath.Base(imgPath), info.width, info.height, time.Since(dimStart))
+		}
 	} else {
 		// Load image to get dimensions and cache them
 		if info := v.loadImageInfo(imgPath); info != nil {
 			v.currentImgWidth = info.width
 			v.currentImgHeight = info.height
 			v.imageCache[imgPath] = info
+			if v.debugProfile {
+				log.Printf("loadImage: Loaded and cached dimensions for %s [%dx%d] (%v)\n", filepath.Base(imgPath), info.width, info.height, time.Since(dimStart))
+			}
 		} else {
 			log.Printf("Error loading image %s\n", imgPath)
 			v.showFeedback("Error loading image", 3*time.Second)
@@ -308,26 +350,43 @@ func (v *ImageViewer) loadImage(index int) {
 		}
 	}
 
-	start := time.Now()
-	log.Printf("loadImage: START loading %s", filepath.Base(imgPath))
-
-	// Update the canvas image file path
-	v.currentImage.File = imgPath
-	log.Printf("loadImage: File set (%v)", time.Since(start))
+	// Update the canvas image using cached data if available
+	fileStart := time.Now()
+	if info, exists := v.imageCache[imgPath]; exists && info.imgData != nil {
+		// Use cached decoded image
+		v.currentImage.Image = info.imgData
+		if v.debugProfile {
+			log.Printf("loadImage: Using cached decoded image (%v since file set start, %v since overall start)", time.Since(fileStart), time.Since(overallStart))
+		}
+	} else {
+		// Fall back to loading from file
+		v.currentImage.File = imgPath
+		if v.debugProfile {
+			log.Printf("loadImage: Set File property (no cache, will load from disk) (%v since file set start, %v since overall start)", time.Since(fileStart), time.Since(overallStart))
+		}
+	}
 
 	// Reset zoom and fit to window
-	// Note: fitToWindow() will refresh the canvas, so we don't need to refresh here
+	fitStart := time.Now()
 	v.zoomLevel = 1.0
 	v.fitToWindow()
-	log.Printf("loadImage: fitToWindow done (%v)", time.Since(start))
+	if v.debugProfile {
+		log.Printf("loadImage: fitToWindow completed (%v since fit start, %v since overall start)", time.Since(fitStart), time.Since(overallStart))
+	}
 
 	// Update window title
+	titleStart := time.Now()
 	v.window.SetTitle(fmt.Sprintf("Timeless Image Viewer - %s (%d/%d)",
 		filepath.Base(imgPath), index+1, len(v.images)))
+	if v.debugProfile {
+		log.Printf("loadImage: Window title updated (%v since title start, %v since overall start)", time.Since(titleStart), time.Since(overallStart))
+	}
 
-	log.Printf("Loaded image %d/%d: %s [%dx%d] (total: %v)\n",
-		index+1, len(v.images), filepath.Base(imgPath),
-		v.currentImgWidth, v.currentImgHeight, time.Since(start))
+	if v.debugProfile {
+		log.Printf("loadImage: COMPLETE %d/%d: %s [%dx%d] (TOTAL: %v)\n",
+			index+1, len(v.images), filepath.Base(imgPath),
+			v.currentImgWidth, v.currentImgHeight, time.Since(overallStart))
+	}
 
 	// Trigger preloading of adjacent images
 	select {
@@ -340,24 +399,33 @@ func (v *ImageViewer) loadImage(index int) {
 // fitToWindow scales the image to fit the window
 func (v *ImageViewer) fitToWindow() {
 	start := time.Now()
-	log.Printf("fitToWindow: START")
+	if v.debugProfile {
+		log.Printf("fitToWindow: START")
+	}
 
 	// Reset to fit mode - clear any fixed sizing
+	propStart := time.Now()
 	v.currentImage.FillMode = canvas.ImageFillContain
 	v.currentImage.SetMinSize(fyne.NewSize(0, 0))
 	v.zoomLevel = 1.0
-	log.Printf("fitToWindow: properties set (%v)", time.Since(start))
+	if v.debugProfile {
+		log.Printf("fitToWindow: properties set (%v)", time.Since(propStart))
+	}
 
-	// Only refresh the container - it will cascade to children
-	// Use the canvas content tree refresh which is faster
-	v.window.Canvas().Content().Refresh()
-	log.Printf("fitToWindow: DONE (%v total)", time.Since(start))
+	// Refresh just the image widget, not the entire content tree
+	refreshStart := time.Now()
+	v.currentImage.Refresh()
+	if v.debugProfile {
+		log.Printf("fitToWindow: Image refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
+	}
 }
 
 // setZoom sets the image to a specific zoom level
 func (v *ImageViewer) setZoom(zoom float32) {
 	start := time.Now()
-	log.Printf("setZoom: START zoom=%.2f", zoom)
+	if v.debugProfile {
+		log.Printf("setZoom: START zoom=%.2f", zoom)
+	}
 
 	v.zoomLevel = zoom
 
@@ -366,13 +434,19 @@ func (v *ImageViewer) setZoom(zoom float32) {
 	height := float32(v.currentImgHeight) * zoom
 
 	// Set to original fill mode and set explicit size
+	propStart := time.Now()
 	v.currentImage.FillMode = canvas.ImageFillOriginal
 	v.currentImage.SetMinSize(fyne.NewSize(width, height))
-	log.Printf("setZoom: properties set (%v)", time.Since(start))
+	if v.debugProfile {
+		log.Printf("setZoom: properties set (%v)", time.Since(propStart))
+	}
 
-	// Only refresh the container - it will cascade to children
-	v.window.Canvas().Content().Refresh()
-	log.Printf("setZoom: DONE (%v total)", time.Since(start))
+	// Refresh just the image widget
+	refreshStart := time.Now()
+	v.currentImage.Refresh()
+	if v.debugProfile {
+		log.Printf("setZoom: Image refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
+	}
 }
 
 // ensureNavOrder creates navigation order if needed and updates navIndex to current position
@@ -416,7 +490,9 @@ func (v *ImageViewer) ensureNavOrder(changeType string) {
 
 // nextImage advances to the next image based on change type
 func (v *ImageViewer) nextImage(changeType string, skip int) {
-	log.Printf("nextImage: changeType=%s, skip=%d, currentIndex=%d, navIndex=%d", changeType, skip, v.currentIndex, v.navIndex)
+	if v.debugProfile {
+		log.Printf("nextImage: changeType=%s, skip=%d, currentIndex=%d, navIndex=%d", changeType, skip, v.currentIndex, v.navIndex)
+	}
 	v.ensureNavOrder(changeType)
 
 	// Navigate forward in current order
@@ -426,8 +502,10 @@ func (v *ImageViewer) nextImage(changeType string, skip int) {
 		v.navIndex = len(v.navOrder) - 1
 	}
 
-	log.Printf("nextImage: navIndex %d -> %d, will load image index %d (%s)",
-		oldNavIndex, v.navIndex, v.navOrder[v.navIndex], filepath.Base(v.images[v.navOrder[v.navIndex]]))
+	if v.debugProfile {
+		log.Printf("nextImage: navIndex %d -> %d, will load image index %d (%s)",
+			oldNavIndex, v.navIndex, v.navOrder[v.navIndex], filepath.Base(v.images[v.navOrder[v.navIndex]]))
+	}
 	v.loadImage(v.navOrder[v.navIndex])
 }
 
@@ -669,7 +747,9 @@ func (v *ImageViewer) handleKeyPress(key *fyne.KeyEvent) {
 // handleRunePress handles character key presses
 func (v *ImageViewer) handleRunePress(r rune) {
 	start := time.Now()
-	log.Printf("handleRunePress: START key=%c", r)
+	if v.debugProfile {
+		log.Printf("handleRunePress: START key=%c", r)
+	}
 
 	switch r {
 	// Navigation
@@ -712,15 +792,17 @@ func (v *ImageViewer) handleRunePress(r rune) {
 
 	case 'z', '1':
 		v.setZoom(1.0)
-		log.Printf("handleRunePress: after setZoom (%v)", time.Since(start))
+		if v.debugProfile {
+			log.Printf("handleRunePress: after setZoom (%v)", time.Since(start))
+		}
 		v.showFeedback("Zoom: 100% (1:1)", 1*time.Second)
-		log.Printf("handleRunePress: after showFeedback (%v)", time.Since(start))
 
 	case 'x':
 		v.fitToWindow()
-		log.Printf("handleRunePress: after fitToWindow (%v)", time.Since(start))
+		if v.debugProfile {
+			log.Printf("handleRunePress: after fitToWindow (%v)", time.Since(start))
+		}
 		v.showFeedback("Fit to window", 1*time.Second)
-		log.Printf("handleRunePress: after showFeedback (%v)", time.Since(start))
 
 	case '2':
 		v.setZoom(2.0)
@@ -745,5 +827,9 @@ func (v *ImageViewer) handleRunePress(r rune) {
 	// Quit
 	case 'q', 'Q':
 		v.app.Quit()
+	}
+
+	if v.debugProfile {
+		log.Printf("handleRunePress: COMPLETE key=%c (%v total)", r, time.Since(start))
 	}
 }
