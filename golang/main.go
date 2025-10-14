@@ -459,6 +459,16 @@ func (v *ImageViewer) fitToWindow() {
 		log.Printf("fitToWindow: START")
 	}
 
+	// Capture current position BEFORE switching to fit mode
+	// so we can restore it when zooming back to 1:1
+	if v.currentImage.FillMode != canvas.ImageFillContain {
+		v.captureScrollPosition()
+		if v.debugProfile {
+			log.Printf("fitToWindow: captured position %.2f%%, %.2f%% before switching to fit mode",
+				v.rememberedScrollX*100, v.rememberedScrollY*100)
+		}
+	}
+
 	// Reset to fit mode - clear any fixed sizing
 	propStart := time.Now()
 	v.currentImage.FillMode = canvas.ImageFillContain
@@ -648,15 +658,42 @@ func (v *ImageViewer) setZoom(zoom float32) {
 		}
 	}
 
-	// Disable scroll capture during zoom operation
+	// Disable scroll capture during zoom operation AND during position restore
 	v.disableScrollCapture = true
 
 	// Use cached dimensions for fast zoom
 	width := float32(v.currentImgWidth) * zoom
 	height := float32(v.currentImgHeight) * zoom
 
-	// Set to stretch mode with explicit size
-	// FillMode Original doesn't respect size, so we use Stretch to force the size
+	// Calculate target scroll position
+	scrollSize := v.scroll.Size()
+	targetX := v.rememberedScrollX * width
+	targetY := v.rememberedScrollY * height
+	offsetX := targetX - scrollSize.Width/2
+	offsetY := targetY - scrollSize.Height/2
+
+	// Clamp to valid range
+	maxX := width - scrollSize.Width
+	maxY := height - scrollSize.Height
+	if offsetX < 0 {
+		offsetX = 0
+	}
+	if offsetX > maxX {
+		offsetX = maxX
+	}
+	if offsetY < 0 {
+		offsetY = 0
+	}
+	if offsetY > maxY {
+		offsetY = maxY
+	}
+
+	if v.debugProfile {
+		log.Printf("setZoom: calculated target scroll offset: %.0f, %.0f for %.2f%%, %.2f%%",
+			offsetX, offsetY, v.rememberedScrollX*100, v.rememberedScrollY*100)
+	}
+
+	// Resize the image
 	propStart := time.Now()
 	v.currentImage.FillMode = canvas.ImageFillStretch
 	newSize := fyne.NewSize(width, height)
@@ -666,7 +703,13 @@ func (v *ImageViewer) setZoom(zoom float32) {
 		log.Printf("setZoom: properties set to %.0fx%.0f (%v)", width, height, time.Since(propStart))
 	}
 
-	// Refresh the image widget, scroll container, and canvas
+	// Set scroll position BEFORE refresh - this prevents flash
+	if v.debugProfile {
+		log.Printf("setZoom: setting scroll position to %.0f, %.0f", offsetX, offsetY)
+	}
+	v.scroll.ScrollToOffset(fyne.NewPos(offsetX, offsetY))
+
+	// Now refresh everything - image will appear at correct position
 	refreshStart := time.Now()
 	v.currentImage.Refresh()
 	v.scroll.Refresh()
@@ -675,62 +718,14 @@ func (v *ImageViewer) setZoom(zoom float32) {
 		log.Printf("setZoom: Image refresh completed (%v since refresh start, %v total)", time.Since(refreshStart), time.Since(start))
 	}
 
-	// Restore scroll position after a minimal delay to let layout settle
-	// Use async to avoid blocking, but make it fast
+	// Keep scroll capture disabled for a while to prevent capturing intermediate positions
 	go func() {
-		time.Sleep(5 * time.Millisecond) // Minimal delay
-
-		fyne.Do(func() {
-			scrollSize := v.scroll.Size()
-
-			if v.debugProfile {
-				log.Printf("setZoom: after delay, remembered position is %.2f%%, %.2f%%",
-					v.rememberedScrollX*100, v.rememberedScrollY*100)
-				log.Printf("setZoom: image size=%.0fx%.0f, scroll size=%.0fx%.0f",
-					width, height, scrollSize.Width, scrollSize.Height)
-			}
-
-			targetX := v.rememberedScrollX * width
-			targetY := v.rememberedScrollY * height
-			offsetX := targetX - scrollSize.Width/2
-			offsetY := targetY - scrollSize.Height/2
-
-			// Clamp to valid range
-			maxX := width - scrollSize.Width
-			maxY := height - scrollSize.Height
-			if offsetX < 0 {
-				offsetX = 0
-			}
-			if offsetX > maxX {
-				offsetX = maxX
-			}
-			if offsetY < 0 {
-				offsetY = 0
-			}
-			if offsetY > maxY {
-				offsetY = maxY
-			}
-
-			if v.debugProfile {
-				log.Printf("setZoom: calling ScrollToOffset(%.0f, %.0f) for %.2f%%, %.2f%%",
-					offsetX, offsetY, v.rememberedScrollX*100, v.rememberedScrollY*100)
-				log.Printf("setZoom: current offset before scroll: %.0f, %.0f", v.scroll.Offset.X, v.scroll.Offset.Y)
-			}
-
-			v.scroll.ScrollToOffset(fyne.NewPos(offsetX, offsetY))
-
-			if v.debugProfile {
-				log.Printf("setZoom: current offset after scroll: %.0f, %.0f", v.scroll.Offset.X, v.scroll.Offset.Y)
-			}
-
-			// Re-enable scroll capture after position is set
-			// Wait a bit to ensure position has fully settled
-			time.Sleep(50 * time.Millisecond)
-			v.disableScrollCapture = false
-			if v.debugProfile {
-				log.Printf("setZoom: re-enabled scroll capture")
-			}
-		})
+		time.Sleep(150 * time.Millisecond)
+		v.disableScrollCapture = false
+		if v.debugProfile {
+			log.Printf("setZoom: re-enabled scroll capture, final offset: %.0f, %.0f",
+				v.scroll.Offset.X, v.scroll.Offset.Y)
+		}
 	}()
 }
 
