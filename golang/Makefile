@@ -24,26 +24,29 @@ help:
 # Build command
 .PHONY: build
 build: linux win mac
-	@echo "Building..."
+	@echo "Building..."a
 	@mkdir -p $(BUILD_DIR)
 
 .PHONY: linux
 linux:
 	@echo "Building Linux (arm64)."
+	@go mod tidy
 	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 $(SRC_DIR)
 	@echo "Building Linux (amd64)."
 	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(SRC_DIR)
 
 .PHONY: mac
 mac:
-	@echo "Building macOS (arm64, Apple Silicon)."
-	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 $(SRC_DIR)
-	@echo "Building macOS (amd64)."
-	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(SRC_DIR)
+	@echo "Building macOS (native architecture)."
+	@mkdir -p $(BUILD_DIR)
+	@go mod tidy
+	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)
+	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 .PHONY: win
 win:
 	@echo "Building Windows (arm64)."
+	@go mod tidy
 	GOOS=windows GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-arm64.exe $(SRC_DIR)
 	@echo "Building Windows (amd64)."
 	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(SRC_DIR)
