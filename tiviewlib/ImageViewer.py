@@ -4,7 +4,8 @@ import math
 import random
 import reusables
 import shutil
-import time;
+import time
+import subprocess
 
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
@@ -212,6 +213,53 @@ class ImageViewer(FloatLayout):
         self.giant_info_button.color=(0,0,0,0)
         self.giant_info_button.background_color=(0,0,0,0)
 
+    def show_exif_metadata(self):
+        """Run exiftool on current image and display filtered metadata"""
+        img = self.imageSet['orderedList'][self.imageSet['setPos']]
+        current_file = img['image']
+
+        try:
+            # Run exiftool with egrep to filter for Date, Size, Encoding, Megapixel, and MIME
+            result = subprocess.run(
+                f'exiftool "{current_file}" | egrep "Date|Size|Encoding|Megapixel|MIME"',
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                # Parse and reformat the output for better alignment
+                lines = result.stdout.strip().split('\n')
+                parsed_data = []
+
+                for line in lines:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        parsed_data.append((key.strip(), value.strip()))
+
+                if parsed_data:
+                    # Find the longest key for alignment
+                    max_key_length = max(len(key) for key, _ in parsed_data)
+
+                    # Format with proper spacing
+                    formatted_lines = [f"{key:<{max_key_length}} : {value}" for key, value in parsed_data]
+                    formatted_output = '\n'.join(formatted_lines)
+
+                    metadata_text = f"Metadata for {os.path.basename(current_file)}:\n\n{formatted_output}"
+                    self.giant_info(metadata_text, 10)
+                else:
+                    self.user_feedback("No metadata found", 2)
+            else:
+                self.user_feedback("No metadata found or exiftool not available", 2)
+                Logger.info(f"exiftool returned no results for {current_file}")
+        except subprocess.TimeoutExpired:
+            self.user_feedback("Metadata lookup timed out", 2)
+            Logger.error(f"exiftool timed out for {current_file}")
+        except Exception as e:
+            self.user_feedback(f"Error running exiftool: {str(e)}", 2)
+            Logger.error(f"Error running exiftool on {current_file}: {str(e)}")
+
     # move or delete image
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
@@ -300,6 +348,14 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
+        # any keypress clears the giant info display
+        if self.giant_info_button.text != '':
+            Clock.unschedule(self.giant_info_clear, all=True)
+            self.giant_info_clear(0)
+            # only return early (prevent retriggering) if 'i' was pressed
+            if text == 'i':
+                return True
+
         # list of potential doublekeys
         doubleKeycodes = {'c': "Copy File", 'm': "Move File", 'q': "Quit Viewer"}
 
@@ -327,7 +383,7 @@ class ImageViewer(FloatLayout):
                 # if moving/copying show destinations
                 if keycode[1] in ("c","m"):
                     section_data = '\n'.join(f"{key}: {value}" for key, value in dict(self.appConfig["ReadOnlySettings"]).items())
-                    self.giant_info(f"Copying/Moving Destinations:\n\n{section_data}", 2)
+                    self.giant_info(f"Copying/Moving Destinations:\n\n{section_data}", 10)
             else:
                 self.previousKey = ''
                 self.currKey = ''
@@ -487,6 +543,9 @@ class ImageViewer(FloatLayout):
             self.image.be_zoom_fit()
             self.sv.scroll_x = 0.5
             self.sv.scroll_y = 0.5
+        # METADATA INFO -----
+        elif text == 'i':
+            self.show_exif_metadata()
         # # This shit never works and it crashes if window is already fullscreen
         # elif text == 'f':
         #     if self.fullscreen_mode == False:
