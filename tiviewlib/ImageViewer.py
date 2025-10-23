@@ -229,27 +229,9 @@ class ImageViewer(FloatLayout):
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                # Parse and reformat the output for better alignment
-                lines = result.stdout.strip().split('\n')
-                parsed_data = []
-
-                for line in lines:
-                    if ':' in line:
-                        key, value = line.split(':', 1)
-                        parsed_data.append((key.strip(), value.strip()))
-
-                if parsed_data:
-                    # Find the longest key for alignment
-                    max_key_length = max(len(key) for key, _ in parsed_data)
-
-                    # Format with proper spacing
-                    formatted_lines = [f"{key:<{max_key_length}} : {value}" for key, value in parsed_data]
-                    formatted_output = '\n'.join(formatted_lines)
-
-                    metadata_text = f"Metadata for {os.path.basename(current_file)}:\n\n{formatted_output}"
-                    self.giant_info(metadata_text, 10)
-                else:
-                    self.user_feedback("No metadata found", 2)
+                # Just use the raw exiftool output for now
+                metadata_text = f"Metadata for {os.path.basename(current_file)}:\n\n{result.stdout}"
+                self.giant_info(metadata_text, 10)
             else:
                 self.user_feedback("No metadata found or exiftool not available", 2)
                 Logger.info(f"exiftool returned no results for {current_file}")
