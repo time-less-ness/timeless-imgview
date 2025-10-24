@@ -24,7 +24,7 @@ brew install python@3.11
 cd $DIR_WHERE_YOU_CHECKED_OUT_IMAGE_VIEWER
 python3 -m venv venv
 . venv/bin/activate
-pip install reusables kivy
+pip install -r requirements.txt
 ```
 
 # Running
@@ -78,9 +78,10 @@ When in the app, you may navigate images like so:
  * `s` - Begin a slideshow, showing a new image every 40s, shift-S for 20s.
  * `f` - Fullscreen mode (this is buggy).
  * `2`, `3`, `4` - View image double, triple, quadruple size.
- * `del-del` - Pressing `DELETE` twice will move the image to `$HOME/.Trash/` folder.
+ * `del` - Pressing `DELETE` will move the image to `$HOME/.Trash/` folder.
  * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W).
  * `ma` - Move to location `a` defined in config, case insensitive. Can define 25 other locations attached to letters `b-z`.
+ * `ca` - Copy to location `a` defined in config, case insensitive. Can define 25 other locations attached to letters `b-z`.
 
 # Image Support
 This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it cannot
@@ -92,4 +93,4 @@ handle WEBM or JPG2000.
 **A** Yeah, Homebrew keeps breaking my Python whenever I upgrade or install something else. Go
 through the installation instructions again. If you know how to fix this, submit a PR. I think
 Linux has this problem less often. Now that the instructions are updated to use `venv` I suspect
-this will be less of a problem.
+this will be a non-issue.

@@ -6,6 +6,8 @@ import reusables
 import shutil
 import time
 import subprocess
+import numpy as np
+from PIL import Image
 
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
@@ -271,6 +273,24 @@ class ImageViewer(FloatLayout):
         self.giant_info_button.color=(0,0,0,0)
         self.giant_info_button.background_color=(0,0,0,0)
 
+    def estimate_jpeg_quality(self, image_path):
+        """Estimate JPEG quality from quantization tables"""
+        try:
+            img = Image.open(image_path)
+            if img.format != 'JPEG':
+                return "N/A (not JPEG)"
+            # Access quantization tables (if available)
+            qtables = img.quantization
+            if qtables:
+                # Simplified heuristic: Higher quality JPEGs have smaller quantization values
+                avg_q = np.mean([np.mean(table) for table in qtables.values()])
+                estimated_quality = max(0, min(100, int(100 - avg_q)))
+                return str(estimated_quality)
+            return "N/A (no qtables)"
+        except Exception as e:
+            Logger.error(f"Error estimating JPEG quality: {str(e)}")
+            return "N/A (error)"
+
     def show_exif_metadata(self):
         """Run exiftool on current image and display filtered metadata"""
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
@@ -286,13 +306,30 @@ class ImageViewer(FloatLayout):
                 lines = result.stdout.strip().split('\n')
                 keys = []
                 values = []
+
+                # Add Directory as the first field
+                absolute_path = os.path.abspath(current_file)
+                directory_path = os.path.dirname(absolute_path)
+                directory_name = os.path.basename(directory_path) if directory_path else '.'
+                keys.append('Directory')
+                values.append(directory_name)
+
+                # Add Filename as the second field
+                keys.append('Filename')
+                values.append(os.path.basename(current_file))
+
+                # Add Image Quality as the third field
+                quality = self.estimate_jpeg_quality(current_file)
+                keys.append('Image Quality')
+                values.append(quality)
+
                 for line in lines:
                     if ':' in line:
                         key, value = line.split(':', 1)
                         keys.append(key.strip())
                         values.append(value.strip())
 
-                self.metadata_header.text = f"Metadata for {os.path.basename(current_file)}"
+                self.metadata_header.text = 'TimelessIV File Info, Press Key to Dismiss'
                 self.metadata_keys.text = '\n'.join(keys)
                 self.metadata_values.text = '\n'.join(values)
                 self.metadata_outer.opacity = 1
