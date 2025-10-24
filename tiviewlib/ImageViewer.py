@@ -10,6 +10,9 @@ import subprocess
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.loader import Loader
@@ -84,6 +87,9 @@ class ImageViewer(FloatLayout):
         except:
             self.slideshowInterval = 20
 
+        # metadata display timer
+        self.metadataEvent = None
+
         # for scary actions multi-key commands
         self.lastScaryTimestamp = 0
         self.previousKey = ''
@@ -135,6 +141,58 @@ class ImageViewer(FloatLayout):
                                   )
         self.add_widget(self.giant_info_button)
         Clock.schedule_once(self.giant_info_clear, 1)
+
+        # metadata display with two columns for proper alignment
+        self.metadata_outer = BoxLayout(orientation='vertical',
+                                       size_hint=(0.9, None),
+                                       pos_hint={'center_x': 0.5, 'center_y': .5},
+                                       padding=20,
+                                       spacing=10)
+        self.metadata_outer.bind(minimum_height=self.metadata_outer.setter('height'))
+        # Add background to outer container
+        with self.metadata_outer.canvas.before:
+            Color(*self.user_feedback_bg)
+            self.metadata_bg = Rectangle(pos=self.metadata_outer.pos, size=self.metadata_outer.size)
+        self.metadata_outer.bind(pos=lambda *x: setattr(self.metadata_bg, 'pos', self.metadata_outer.pos),
+                                size=lambda *x: setattr(self.metadata_bg, 'size', self.metadata_outer.size))
+
+        # Header label
+        self.metadata_header = Label(text='', font_name="Times New Roman",
+                                    font_size=self.user_feedback_font_size,
+                                    halign='center', valign='middle',
+                                    size_hint_y=None,
+                                    height=self.user_feedback_font_size * 1.5,
+                                    color=self.user_feedback_fg)
+        self.metadata_header.bind(size=lambda *x: setattr(self.metadata_header, 'text_size', self.metadata_header.size))
+        self.metadata_outer.add_widget(self.metadata_header)
+
+        # Container for the two-column data
+        self.metadata_container = BoxLayout(orientation='horizontal', spacing=20, size_hint_y=None)
+        self.metadata_keys = Label(text='', font_name="Times New Roman",
+                                   font_size=self.user_feedback_font_size,
+                                   halign='right', valign='middle',
+                                   size_hint_y=None,
+                                   color=self.user_feedback_fg)
+        self.metadata_values = Label(text='', font_name="Times New Roman",
+                                     font_size=self.user_feedback_font_size,
+                                     halign='left', valign='middle',
+                                     size_hint_y=None,
+                                     color=self.user_feedback_fg)
+        # Set text_size with fixed width but unrestricted height (None) to allow multiline
+        self.metadata_keys.bind(width=lambda *x: setattr(self.metadata_keys, 'text_size', (self.metadata_keys.width, None)))
+        self.metadata_values.bind(width=lambda *x: setattr(self.metadata_values, 'text_size', (self.metadata_values.width, None)))
+        # Bind texture_size to height so labels grow with content
+        self.metadata_keys.bind(texture_size=lambda *x: setattr(self.metadata_keys, 'height', self.metadata_keys.texture_size[1]))
+        self.metadata_values.bind(texture_size=lambda *x: setattr(self.metadata_values, 'height', self.metadata_values.texture_size[1]))
+        # Container height should be the max of the two labels
+        self.metadata_keys.bind(height=lambda *x: setattr(self.metadata_container, 'height', max(self.metadata_keys.height, self.metadata_values.height)))
+        self.metadata_values.bind(height=lambda *x: setattr(self.metadata_container, 'height', max(self.metadata_keys.height, self.metadata_values.height)))
+        self.metadata_container.add_widget(self.metadata_keys)
+        self.metadata_container.add_widget(self.metadata_values)
+        self.metadata_outer.add_widget(self.metadata_container)
+
+        self.add_widget(self.metadata_outer)
+        self.metadata_outer.opacity = 0
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -219,28 +277,35 @@ class ImageViewer(FloatLayout):
         current_file = img['image']
 
         try:
-            # Run exiftool with egrep to filter for Date, Size, Encoding, Megapixel, and MIME
             result = subprocess.run(
                 f'exiftool "{current_file}" | egrep "Date|Size|Encoding|Megapixel|MIME"',
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=5
+                shell=True, capture_output=True, text=True, timeout=5
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                # Just use the raw exiftool output for now
-                metadata_text = f"Metadata for {os.path.basename(current_file)}:\n\n{result.stdout}"
-                self.giant_info(metadata_text, 10)
+                lines = result.stdout.strip().split('\n')
+                keys = []
+                values = []
+                for line in lines:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        keys.append(key.strip())
+                        values.append(value.strip())
+
+                self.metadata_header.text = f"Metadata for {os.path.basename(current_file)}"
+                self.metadata_keys.text = '\n'.join(keys)
+                self.metadata_values.text = '\n'.join(values)
+                self.metadata_outer.opacity = 1
+                # Unschedule any existing timer before scheduling a new one
+                if self.metadataEvent:
+                    Clock.unschedule(self.metadataEvent)
+                self.metadataEvent = Clock.schedule_once(lambda dt: setattr(self.metadata_outer, 'opacity', 0), 10)
             else:
                 self.user_feedback("No metadata found or exiftool not available", 2)
-                Logger.info(f"exiftool returned no results for {current_file}")
         except subprocess.TimeoutExpired:
             self.user_feedback("Metadata lookup timed out", 2)
-            Logger.error(f"exiftool timed out for {current_file}")
         except Exception as e:
             self.user_feedback(f"Error running exiftool: {str(e)}", 2)
-            Logger.error(f"Error running exiftool on {current_file}: {str(e)}")
 
     # move or delete image
     def move_image(self, destDir):
@@ -330,10 +395,14 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
-        # any keypress clears the giant info display
-        if self.giant_info_button.text != '':
+        # any keypress clears the giant info display and metadata display
+        if self.giant_info_button.text != '' or self.metadata_outer.opacity > 0:
             Clock.unschedule(self.giant_info_clear, all=True)
             self.giant_info_clear(0)
+            if self.metadataEvent:
+                Clock.unschedule(self.metadataEvent)
+                self.metadataEvent = None
+            self.metadata_outer.opacity = 0
             # only return early (prevent retriggering) if 'i' was pressed
             if text == 'i':
                 return True
