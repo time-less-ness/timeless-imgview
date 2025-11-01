@@ -1,0 +1,7 @@
+[project]
+name = "timeless-imgview"
+version = "0.1.0"
+description = "CLI image viewer"
+readme = "README.md"
+requires-python = ">=3.11.3"
+dependencies = []
