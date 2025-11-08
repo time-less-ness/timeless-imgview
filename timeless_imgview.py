@@ -132,12 +132,43 @@ if __name__ == '__main__':
         output_geom = f"{str(int(Window.size[0]/2))}x{str(int(Window.size[1]/2))}+{str(int(Window.left))},{str(int(Window.top))}"
     else:
         output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
-    # re-read in case another version overwrote
-    slideshowInterval = config.get("UI", "slideshow-interval")
-    config.read(config_filename)
-    config.set('LastRun', f'{os.getcwd()}--geom', output_geom)
-    config.set('LastRun', 'lastgeom', output_geom)
-    config.set('UI', 'slideshow-interval', slideshowInterval)
+    # re-read in case another version overwrote - use fresh ConfigParser to avoid order issues
+    fresh_config = configparser.ConfigParser()
+    fresh_config.read(config_filename)
+
+    # Read slideshow-interval from the freshly loaded config
+    slideshowInterval = fresh_config.get("UI", "slideshow-interval")
+
+    # Implement LRU cache for LastRun geometries (max 50 entries)
+    current_cwd_key = f'{os.getcwd().lower()}--geom'
+
+    # Get all existing LastRun entries, preserving order from the file
+    existing_entries = []
+    if fresh_config.has_section('LastRun'):
+        for key, value in fresh_config.items('LastRun'):
+            existing_entries.append((key, value))
+
+    # Remove the LastRun section and recreate it with proper order
+    fresh_config.remove_section('LastRun')
+    fresh_config.add_section('LastRun')
+
+    # 1. Always add 'lastgeom' first (the fallback default)
+    fresh_config.set('LastRun', 'lastgeom', output_geom)
+
+    # 2. Add the current CWD at the top of the list (after lastgeom)
+    fresh_config.set('LastRun', current_cwd_key, output_geom)
+
+    # 3. Add remaining entries (up to 48 more to reach max of 50 total)
+    # Skip the current CWD key and 'lastgeom' if they exist in old entries
+    entries_added = 2  # lastgeom and current_cwd_key
+    for key, value in existing_entries:
+        if entries_added >= 50:
+            break
+        if key != current_cwd_key and key != 'lastgeom':
+            fresh_config.set('LastRun', key, value)
+            entries_added += 1
+
+    fresh_config.set('UI', 'slideshow-interval', slideshowInterval)
     with open(config_filename, 'w') as configfile:
-        config.write(configfile)
+        fresh_config.write(configfile)
 
