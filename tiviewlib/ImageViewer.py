@@ -298,7 +298,7 @@ class ImageViewer(FloatLayout):
 
         try:
             result = subprocess.run(
-                f'exiftool "{current_file}" | egrep "Date|Size|Encoding|Megapixel|MIME"',
+                f'exiftool "{current_file}" | egrep "Date|Size|Encoding|Megapixel|MIME|Comment"',
                 shell=True, capture_output=True, text=True, timeout=5
             )
 
