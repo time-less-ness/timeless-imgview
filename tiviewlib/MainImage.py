@@ -4,11 +4,14 @@ import math
 import random
 import shutil
 
+import numpy as np
 import reusables
+from PIL import Image as PILImage, ImageOps
 from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.loader import Loader
 from kivy.logger import Logger
+from kivy.graphics.texture import Texture
 
 class MainImage(Image):
 
@@ -18,7 +21,9 @@ class MainImage(Image):
             **kwargs):
         self.imageSet = imageSet
         self.zoomMode = 'fit'
-        super().__init__(source=self.gen_image(), **kwargs)
+        self._texture_cache = {}
+        super().__init__(**kwargs)
+        self.load_image_with_exif()
 
         # can be bigger than bounding widget
         self.allow_stretch = True
@@ -31,6 +36,52 @@ class MainImage(Image):
         if texture:
             texture.mag_filter = 'linear'
             texture.min_filter = 'linear'
+
+    def load_with_exif_transpose(self, filepath):
+        """
+        Load image using PIL, apply EXIF orientation, and return Kivy texture.
+        Falls back to None if EXIF processing fails.
+        """
+        if filepath in self._texture_cache:
+            return self._texture_cache[filepath]
+
+        try:
+            pil_img = PILImage.open(filepath)
+            transposed = ImageOps.exif_transpose(pil_img)
+
+            if transposed.mode != 'RGB':
+                if transposed.mode == 'RGBA':
+                    background = PILImage.new('RGB', transposed.size, (255, 255, 255))
+                    background.paste(transposed, mask=transposed.split()[3])
+                    transposed = background
+                else:
+                    transposed = transposed.convert('RGB')
+
+            img_array = np.array(transposed)
+            texture = Texture.create(
+                size=(transposed.size[0], transposed.size[1]),
+                colorfmt='rgb'
+            )
+            texture.blit_buffer(img_array.tobytes(), colorfmt='rgb', bufferfmt='ubyte')
+            texture.flip_vertical()
+
+            self._texture_cache[filepath] = texture
+            return texture
+
+        except Exception as e:
+            Logger.warning(f"EXIF transpose failed for {filepath}: {e}")
+            return None
+
+    def load_image_with_exif(self):
+        """Load current image with EXIF orientation support."""
+        filepath = self.gen_image()
+        texture = self.load_with_exif_transpose(filepath)
+
+        if texture:
+            self.texture = texture
+            self._source = filepath
+        else:
+            self.source = filepath
 
     def set_window_pos(self):
         # make sure image doesn't go wonky if it's smaller than
@@ -80,7 +131,7 @@ class MainImage(Image):
 
             self.imageSet['changeType'] = changeType
             self.imageSet['setPos'] = self.imageSet['orderedList'].index(tmpImg)
-            self.source = self.gen_image()
+            self.load_image_with_exif()
 
     def next_image(self, changeType, howMany=None):
         self.flip_image_changeType(changeType)
@@ -95,25 +146,34 @@ class MainImage(Image):
         if self.imageSet['cacheImage'].filename == self.imageSet['orderedList'][self.imageSet['setPos']]['image']:
             Window.set_title(f"TimelessIV - {self.imageSet['cacheImage'].filename}")
             self.texture = self.imageSet['cacheImage'].texture
-            self.source = self.imageSet['cacheImage'].filename
+            self._source = self.imageSet['cacheImage'].filename
         else:
-            self.source = self.gen_image()
+            self.load_image_with_exif()
 
-        # from image-to-image get to right zoom setting
         if self.zoomMode == 'pan':
-            #self.be_zoom_1_to_1()
             pass
         elif self.zoomMode == 'fit':
             self.be_zoom_fit()
 
         try:
-            #Logger.debug(f"Caching NEXT image {self.imageSet['setPos'] + 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image']}")
-            self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image'])
+            cache_path = self.imageSet['orderedList'][self.imageSet['setPos'] + 1]['image']
+            self.imageSet['cacheImage'] = self._load_cached_image_with_exif(cache_path)
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:
             pass
 
         self.pos = [0,0]
+
+    def _load_cached_image_with_exif(self, filepath):
+        """Load image for caching with EXIF transpose support."""
+        texture = self.load_with_exif_transpose(filepath)
+        if texture:
+            cache_img = Loader.image(filepath)
+            cache_img.texture = texture
+            cache_img.filename = filepath
+            return cache_img
+        else:
+            return Loader.image(filepath)
 
     def prev_image(self, changeType, howMany=None):
         self.flip_image_changeType(changeType)
@@ -129,13 +189,13 @@ class MainImage(Image):
         if self.imageSet['cacheImage'].filename == self.imageSet['orderedList'][self.imageSet['setPos']]['image']:
             Window.set_title(f"TimelessIV - {self.imageSet['cacheImage'].filename}")
             self.texture = self.imageSet['cacheImage'].texture
-            self.source = self.imageSet['cacheImage'].filename
+            self._source = self.imageSet['cacheImage'].filename
         else:
-            self.source = self.gen_image()
+            self.load_image_with_exif()
 
         try:
-            #Logger.debug(f"Caching PREV image {self.imageSet['setPos'] - 1} named {self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']}")
-            self.imageSet['cacheImage'] = Loader.image(self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image'])
+            cache_path = self.imageSet['orderedList'][self.imageSet['setPos'] - 1]['image']
+            self.imageSet['cacheImage'] = self._load_cached_image_with_exif(cache_path)
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:
             pass
@@ -146,7 +206,6 @@ class MainImage(Image):
         Logger.debug(f"cacheImage_loaded() called with {cacheImage.filename}")
         if cacheImage.texture:
             if self.imageSet['cacheImage'].filename == self.imageSet['orderedList'][self.imageSet['setPos']]['image']:
-                # if there are exactly two images... this excepts
                 try:
                     self.imageSet['cacheImage'].texture = cacheImage.texture
                 except:
