@@ -21,6 +21,15 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'info')
 Logger.setLevel(LOG_LEVELS[LOG_LEVEL])
 Logger.info(f"LOG_LEVEL={LOG_LEVEL}, to force to some level, export LOG_LEVEL=info (or debug,..) before starting.")
 
+# Sync PIL logging level with Kivy to suppress verbose EXIF debug messages
+try:
+    import logging
+    kivy_log_level = Logger.getEffectiveLevel()
+    logging.getLogger('PIL').setLevel(kivy_log_level)
+    Logger.info(f"Set PIL logger level to {logging.getLevelName(kivy_log_level)} to match Kivy")
+except Exception:
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+
 deviceRes = [3456, 2234]
 resStr = None
 if platform == 'linux':

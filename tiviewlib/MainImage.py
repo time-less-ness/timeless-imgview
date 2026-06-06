@@ -3,7 +3,6 @@ import sys
 import math
 import random
 import shutil
-import logging
 
 import numpy as np
 import reusables
@@ -13,17 +12,6 @@ from kivy.core.window import Window
 from kivy.loader import Loader
 from kivy.logger import Logger
 from kivy.graphics.texture import Texture
-
-# Sync PIL logging level with Kivy's current level
-# This prevents verbose EXIF debug messages while respecting user's log level setting
-try:
-    kivy_log_level = Logger.getEffectiveLevel()
-    pil_logger = logging.getLogger('PIL')
-    pil_logger.setLevel(kivy_log_level)
-    Logger.info(f"Set PIL logger level to {logging.getLevelName(kivy_log_level)} to match Kivy")
-except Exception:
-    # If Kivy Logger isn't initialized yet, default to WARNING to suppress EXIF spam
-    logging.getLogger('PIL').setLevel(logging.WARNING)
 
 class MainImage(Image):
 
