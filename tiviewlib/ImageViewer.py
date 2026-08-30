@@ -335,7 +335,10 @@ class ImageViewer(FloatLayout):
                     if ':' in line:
                         key, value = line.split(':', 1)
                         keys.append(key.strip())
-                        values.append(value.strip())
+                        # Comment for example is often too long which causees keys and values to not line up
+                        # 120 characters feels about right to prevent this problem. longterm fix: make keys
+                        # and values be some group so long values wrapping don't cause mis-alignment
+                        values.append(value.strip()[0:120])
 
                 self.metadata_header.text = 'TimelessIV File Info, Press Key to Dismiss'
                 self.metadata_keys.text = '\n'.join(keys)
@@ -386,8 +389,7 @@ class ImageViewer(FloatLayout):
 
     def change_to_image(self, image_pos):
         self.imageSet['setPos'] = image_pos
-        self.image.source = self.image.gen_image()
-        self.image.reload()
+        self.image.load_image_with_exif()
 
     def _keyboard_closed(self):
         self._keyboard.unbind(on_key_down=self._on_keyboard_down)
