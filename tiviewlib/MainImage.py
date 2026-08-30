@@ -84,19 +84,18 @@ class MainImage(Image):
             self.source = filepath
 
     def set_window_pos(self):
-        # make sure image doesn't go wonky if it's smaller than
-        # the display window - otherwise try to centerish it
+        # make sure image doesn't go wonky if it's smaller than the display
+        # window. actual on-screen position/centering is owned entirely by
+        # the ScrollView via scroll_x/scroll_y - setting self.x/self.y here
+        # directly is normally masked by the ScrollView's own re-layout on
+        # size change, but if the size doesn't actually change (eg re-pressing
+        # 1:1 zoom while already at 1:1) it sticks and visibly shifts the
+        # image off of wherever scroll_x/scroll_y had it.
         if self.size[0] < Window.size[0]:
             self.size[0] = Window.size[0]
-        else:
-            deltaX = Window.size[0] - self.size[0]
-            self.x = int(deltaX / 2)
 
         if self.size[1] < Window.size[1]:
             self.size[1] = Window.size[1]
-        else:
-            deltaY = Window.size[1] - self.size[1]
-            self.y = int(deltaY / 2)
 
     def be_zoom_1_to_1(self):
         self.size = self.texture_size
@@ -162,8 +161,6 @@ class MainImage(Image):
         except:
             pass
 
-        self.pos = [0,0]
-
     def _load_cached_image_with_exif(self, filepath):
         """Load image for caching with EXIF transpose support."""
         texture = self.load_with_exif_transpose(filepath)
@@ -199,8 +196,6 @@ class MainImage(Image):
             self.imageSet['cacheImage'].bind(on_load=self.cacheImage_loaded)
         except:
             pass
-
-        self.pos = [0,0]
 
     def cacheImage_loaded(self, cacheImage):
         Logger.debug(f"cacheImage_loaded() called with {cacheImage.filename}")
