@@ -64,7 +64,14 @@ class ImageViewer(FloatLayout):
 
         # Define widgets used so we can reference them elsewhere
         self.image = MainImage(imageSet=self.imageSet)
-        self.sv = ScrollView(size=Window.size)
+        # Kivy's effect_x/effect_y (used for touch/mouse-drag panning) recompute
+        # their bounds on every viewport size change (zoom, new image, resize)
+        # and silently force scroll_x/scroll_y toward an edge as a side effect -
+        # sometimes landing exactly on 0 or 1, which looks broken but passes our
+        # own out-of-bounds check, so spring_back_scroll() never catches it.
+        # This app is keyboard-only, so disable the effects entirely and let
+        # our own code be the only thing that ever sets scroll_x/scroll_y.
+        self.sv = ScrollView(size=Window.size, effect_x=None, effect_y=None)
         self.sv.scroll_x = 0.5
         self.sv.scroll_y = 0.5
         self.sv.add_widget(self.image)
@@ -81,6 +88,7 @@ class ImageViewer(FloatLayout):
         self.scrollEvent = None
         # just over 100x/sec
         self.scrollScheduleInterval = 0.008
+        self.springbackEvent = None
 
         # slideshow event
         self.slideshowEvent = None
@@ -386,6 +394,11 @@ class ImageViewer(FloatLayout):
         self._keyboard = None
 
     def calc_scroll_amt(self, direction, modifiers):
+        # a fresh key press takes over from any in-progress springback
+        if self.springbackEvent:
+            Clock.unschedule(self.springbackEvent)
+            self.springbackEvent = None
+
         # modify how much we scroll with keys
         if self.scrollingDir[direction] == True:
             self.scrollPix += self.progressiveSpeed
@@ -401,27 +414,87 @@ class ImageViewer(FloatLayout):
         else:
             tX = self.scrollPix
 
-        # now record which way are we scrolling
-        self.scrollingDir = [False, False, False, False]
+        # now record which way are we scrolling - keep any other held
+        # direction active too, so eg down+right can scroll diagonally
         self.scrollingDir[direction] = True
 
         return self.sv.convert_distance_to_scroll(tX, tX)
 
     def _on_keyboard_up(self, keyboard, keycode):
+        dirByKey = {'up': 0, 'down': 1, 'left': 2, 'right': 3}
+        if keycode[1] in dirByKey:
+            self.scrollingDir[dirByKey[keycode[1]]] = False
+
+        # only stop once every arrow key has been released
+        if any(self.scrollingDir):
+            return
+
         # unschedule the keep-on-scrolling f()
         Clock.unschedule(self.scrollEvent, all=True)
         self.scrollEvent = None
         self.scrollPix = self.progressiveReset
 
+        # if the key let us drift past the edge, ease back onto the canvas
+        if self.springbackEvent is None and (
+                self.sv.scroll_x < 0 or self.sv.scroll_x > 1
+                or self.sv.scroll_y < 0 or self.sv.scroll_y > 1):
+            self.springbackEvent = Clock.schedule_interval(self.spring_back_scroll, self.scrollScheduleInterval)
+
     def keep_on_scrollin(self, dx):
+        # scroll_x/scroll_y are only meaningful in [0, 1], but let a held key
+        # push slightly past that so holding it still gives live feedback even
+        # when the image has no room to move. spring_back_scroll() eases it
+        # back once the key is released - without this clamp the value can
+        # drift arbitrarily far, and a later zoom would jump the image way
+        # off-screen and take a long time to creep back into view.
+        # these are independent ifs (not elif) so eg down+right can both
+        # apply within the same tick and the image can pan diagonally.
         if self.scrollingDir[0] == True:
-            self.sv.scroll_y += self.scrollAmount[1]
-        elif self.scrollingDir[1] == True:
-            self.sv.scroll_y -= self.scrollAmount[1]
-        elif self.scrollingDir[2] == True:
-            self.sv.scroll_x -= self.scrollAmount[0]
-        elif self.scrollingDir[3] == True:
-            self.sv.scroll_x += self.scrollAmount[0]
+            self.sv.scroll_y = min(1.5, self.sv.scroll_y + self.scrollAmount[1])
+        if self.scrollingDir[1] == True:
+            self.sv.scroll_y = max(-0.5, self.sv.scroll_y - self.scrollAmount[1])
+        if self.scrollingDir[2] == True:
+            self.sv.scroll_x = max(-0.5, self.sv.scroll_x - self.scrollAmount[0])
+        if self.scrollingDir[3] == True:
+            self.sv.scroll_x = min(1.5, self.sv.scroll_x + self.scrollAmount[0])
+
+    def _spring_axis_step(self, axis):
+        """Ease scroll_x/scroll_y back to [0, 1]. If the image is entirely
+        off-screen on this axis, jump straight to half-visible first - easing
+        by 50%/tick would otherwise stay invisible for a long time before any
+        pixel of the image re-enters the viewport."""
+        current = getattr(self.sv, f'scroll_{axis}')
+        target = min(1, max(0, current))
+        if current == target:
+            return True
+
+        if axis == 'x':
+            view_span = Window.size[0]
+            near_edge, far_edge = self.image.x, self.image.x + self.image.width
+            scroll_span = self.image.width - view_span
+        else:
+            view_span = Window.size[1]
+            near_edge, far_edge = self.image.y, self.image.y + self.image.height
+            scroll_span = self.image.height - view_span
+
+        if scroll_span > 0 and (far_edge < 0 or near_edge > view_span):
+            edge = far_edge if far_edge < 0 else near_edge
+            pixel_delta = (view_span / 2) - edge
+            new_value = current - (pixel_delta / scroll_span)
+        else:
+            new_value = current + (target - current) * 0.5
+            if abs(new_value - target) < 0.002:
+                new_value = target
+
+        setattr(self.sv, f'scroll_{axis}', new_value)
+        return new_value == target
+
+    def spring_back_scroll(self, dt):
+        x_done = self._spring_axis_step('x')
+        y_done = self._spring_axis_step('y')
+        if x_done and y_done:
+            Clock.unschedule(self.springbackEvent)
+            self.springbackEvent = None
 
     def slideshowNextImage(self, dx):
         self.image.next_image(self.image.imageSet['changeType'])
