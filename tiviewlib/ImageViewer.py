@@ -100,6 +100,11 @@ class ImageViewer(FloatLayout):
         # metadata display timer
         self.metadataEvent = None
 
+        # annotate (caption/tags) state
+        self.annotate_mode = False
+        self.annotate_text = ''
+        self.last_annotation_text = ''
+
         # for scary actions multi-key commands
         self.lastScaryTimestamp = 0
         self.previousKey = ''
@@ -203,6 +208,40 @@ class ImageViewer(FloatLayout):
 
         self.add_widget(self.metadata_outer)
         self.metadata_outer.opacity = 0
+
+        # annotate (caption/tags) text entry box - same look as metadata_outer
+        self.annotate_outer = BoxLayout(orientation='vertical',
+                                       size_hint=(0.9, None),
+                                       pos_hint={'center_x': 0.5, 'center_y': .5},
+                                       padding=20,
+                                       spacing=10)
+        self.annotate_outer.bind(minimum_height=self.annotate_outer.setter('height'))
+        with self.annotate_outer.canvas.before:
+            Color(*self.user_feedback_bg)
+            self.annotate_bg = Rectangle(pos=self.annotate_outer.pos, size=self.annotate_outer.size)
+        self.annotate_outer.bind(pos=lambda *x: setattr(self.annotate_bg, 'pos', self.annotate_outer.pos),
+                                size=lambda *x: setattr(self.annotate_bg, 'size', self.annotate_outer.size))
+
+        self.annotate_header = Label(text='', font_name="Times New Roman",
+                                    font_size=self.user_feedback_font_size,
+                                    halign='center', valign='middle',
+                                    size_hint_y=None,
+                                    height=self.user_feedback_font_size * 1.5,
+                                    color=self.user_feedback_fg)
+        self.annotate_header.bind(size=lambda *x: setattr(self.annotate_header, 'text_size', self.annotate_header.size))
+        self.annotate_outer.add_widget(self.annotate_header)
+
+        self.annotate_input = Label(text='', font_name="Times New Roman",
+                                   font_size=self.user_feedback_font_size,
+                                   halign='left', valign='middle',
+                                   size_hint_y=None,
+                                   color=self.user_feedback_fg)
+        self.annotate_input.bind(width=lambda *x: setattr(self.annotate_input, 'text_size', (self.annotate_input.width, None)))
+        self.annotate_input.bind(texture_size=lambda *x: setattr(self.annotate_input, 'height', self.annotate_input.texture_size[1]))
+        self.annotate_outer.add_widget(self.annotate_input)
+
+        self.add_widget(self.annotate_outer)
+        self.annotate_outer.opacity = 0
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -354,6 +393,71 @@ class ImageViewer(FloatLayout):
             self.user_feedback("Metadata lookup timed out", 2)
         except Exception as e:
             self.user_feedback(f"Error running exiftool: {str(e)}", 2)
+
+    def read_exif_comment(self, filepath):
+        """Read current EXIF UserComment ('Comment') for annotate prefill"""
+        try:
+            result = subprocess.run(
+                ['exiftool', '-UserComment', '-s3', filepath],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception as e:
+            Logger.error(f"Error reading UserComment: {str(e)}")
+        return ''
+
+    def write_exif_comment(self, filepath, text):
+        """Write text into EXIF UserComment ('Comment' / 'Caption or Tags')"""
+        try:
+            result = subprocess.run(
+                ['exiftool', '-overwrite_original', f'-UserComment={text}', filepath],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except Exception as e:
+            Logger.error(f"Error writing UserComment: {str(e)}")
+            return False
+
+    def start_annotate(self, prefill_from_exif):
+        """Open the Caption or Tags entry box, prefilled from EXIF or last-typed text"""
+        img = self.imageSet['orderedList'][self.imageSet['setPos']]
+        current_file = img['image']
+        if prefill_from_exif:
+            self.annotate_text = self.read_exif_comment(current_file)
+        else:
+            self.annotate_text = self.last_annotation_text
+        self.annotate_mode = True
+        self.annotate_header.text = 'Caption or Tags  (Enter=save, Esc=cancel)'
+        self.annotate_input.text = self.annotate_text + '|'
+        self.annotate_outer.opacity = 1
+
+        # hide other overlays, same as the any-keypress metadata-dismiss logic
+        Clock.unschedule(self.giant_info_clear, all=True)
+        self.giant_info_clear(0)
+        if self.metadataEvent:
+            Clock.unschedule(self.metadataEvent)
+            self.metadataEvent = None
+        self.metadata_outer.opacity = 0
+
+    def commit_annotate(self):
+        """Save the typed Caption/Tags text into EXIF and close the box"""
+        img = self.imageSet['orderedList'][self.imageSet['setPos']]
+        current_file = img['image']
+        ok = self.write_exif_comment(current_file, self.annotate_text)
+        self.last_annotation_text = self.annotate_text
+        self.annotate_mode = False
+        self.annotate_outer.opacity = 0
+        if ok:
+            self.user_feedback('Caption/Tags saved', 2)
+        else:
+            self.user_feedback('Failed to save Caption/Tags (exiftool error)', 3)
+
+    def cancel_annotate(self):
+        """Close the box without writing EXIF, remembering what was typed"""
+        self.last_annotation_text = self.annotate_text
+        self.annotate_mode = False
+        self.annotate_outer.opacity = 0
 
     # move or delete image
     def move_image(self, destDir):
@@ -507,6 +611,28 @@ class ImageViewer(FloatLayout):
         # keyboard events hide the cursor
         Window.show_cursor = False
 
+        # ANNOTATE TEXT ENTRY ---- swallow all keys while composing a caption
+        if self.annotate_mode:
+            # bare modifier keys still fire on_key_down (and can carry junk in
+            # `text` on some platforms) - never treat them as typed characters
+            modifierKeycodes = ('shift', 'rshift', 'ctrl', 'lctrl', 'rctrl',
+                                 'alt', 'alt-gr', 'meta', 'lmeta', 'rmeta',
+                                 'super', 'capslock', 'numlock', 'screenlock',
+                                 'compose', 'pause')
+            if keycode[1] == 'escape':
+                self.cancel_annotate()
+            elif keycode[1] in ('enter', 'numpadenter'):
+                self.commit_annotate()
+            elif keycode[1] == 'backspace':
+                self.annotate_text = self.annotate_text[:-1]
+                self.annotate_input.text = self.annotate_text + '|'
+            elif text and text.isprintable() and keycode[1] not in modifierKeycodes:
+                # letters arrive lowercase in `text` regardless of shift state
+                ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
+                self.annotate_text += ch
+                self.annotate_input.text = self.annotate_text + '|'
+            return True
+
         # any keypress clears the giant info display and metadata display
         if self.giant_info_button.text != '' or self.metadata_outer.opacity > 0:
             Clock.unschedule(self.giant_info_clear, all=True)
@@ -525,7 +651,7 @@ class ImageViewer(FloatLayout):
         # is this an initial press after some delay, or a quick successor?
         if (keycode[0] >= 97 and keycode[0] <= 122) \
         or (keycode[0] >= 48 and keycode[0] <= 57) \
-        or (keycode[1] in '!@#$%^&*()_+-=\{\}[]:;<>?,./"\''):
+        or (keycode[1] in '!@#$%^&*()_+-=[]:;<>?,./"\''):
             # many keyboard events cancel the slideshow
             if self.slideshowEvent and text != 's':
                 Clock.unschedule(self.slideshowEvent, all=True)
@@ -709,6 +835,10 @@ class ImageViewer(FloatLayout):
         # METADATA INFO -----
         elif text == 'i':
             self.show_exif_metadata()
+        # ANNOTATE -----
+        elif keycode[1] == 'a':
+            # `text` stays lowercase 'a' even with shift held, so use modifiers
+            self.start_annotate(prefill_from_exif=('shift' not in modifiers))
         # # This shit never works and it crashes if window is already fullscreen
         # elif text == 'f':
         #     if self.fullscreen_mode == False:
