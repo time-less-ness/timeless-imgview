@@ -258,7 +258,7 @@ class ImageViewer(FloatLayout):
         search_row_h = self.user_feedback_font_size * 1.4
 
         self.search_left_outer = BoxLayout(orientation='vertical',
-                                          size_hint=(0.4, 0.9),
+                                          size_hint=(0.2, 0.9),
                                           pos_hint={'x': 0.03, 'center_y': 0.5},
                                           padding=20,
                                           spacing=10)
@@ -293,8 +293,9 @@ class ImageViewer(FloatLayout):
         self.add_widget(self.search_left_outer)
         self.search_left_outer.opacity = 0
 
+        # Search Right Box
         self.search_right_outer = BoxLayout(orientation='vertical',
-                                           size_hint=(0.4, 0.9),
+                                           size_hint=(0.73, 0.9),
                                            pos_hint={'right': 0.97, 'center_y': 0.5},
                                            padding=20,
                                            spacing=10)
@@ -543,6 +544,7 @@ class ImageViewer(FloatLayout):
         self.update_search_results()
         self.search_left_outer.opacity = 1
         self.search_right_outer.opacity = 1
+        self.search_file_truncate = 80
 
         # hide other overlays, same as the any-keypress metadata-dismiss logic
         Clock.unschedule(self.giant_info_clear, all=True)
@@ -586,7 +588,8 @@ class ImageViewer(FloatLayout):
             filename = os.path.basename(path)
             parent = os.path.basename(os.path.dirname(path))
             name = f'{parent}/{filename}' if parent else filename
-            name = name[:40]
+            # truncate filenames to N characters
+            name = name[:self.search_file_truncate]
             lines[i] = f'[b]> {name}[/b]' if i == self.search_selected else f'  {name}'
         self.search_results_col.text = '\n'.join(lines)
 
