@@ -14,6 +14,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
+from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -104,6 +105,14 @@ class ImageViewer(FloatLayout):
         self.annotate_mode = False
         self.annotate_text = ''
         self.last_annotation_text = ''
+
+        # search state
+        self.search_mode = False
+        self.search_text = ''
+        self.search_start_pos = 0
+        self.search_event = None
+        self.search_groups = []
+        self.search_selected = 0
 
         # for scary actions multi-key commands
         self.lastScaryTimestamp = 0
@@ -242,6 +251,69 @@ class ImageViewer(FloatLayout):
 
         self.add_widget(self.annotate_outer)
         self.annotate_outer.opacity = 0
+
+        # search-for-images: two separate boxes, each ~90% of the window
+        # tall - left is instructions + the typed text, right is a single
+        # column of up to 20 results
+        search_row_h = self.user_feedback_font_size * 1.4
+
+        self.search_left_outer = BoxLayout(orientation='vertical',
+                                          size_hint=(0.4, 0.9),
+                                          pos_hint={'x': 0.03, 'center_y': 0.5},
+                                          padding=20,
+                                          spacing=10)
+        with self.search_left_outer.canvas.before:
+            Color(*self.user_feedback_bg)
+            self.search_left_bg = Rectangle(pos=self.search_left_outer.pos, size=self.search_left_outer.size)
+        self.search_left_outer.bind(pos=lambda *x: setattr(self.search_left_bg, 'pos', self.search_left_outer.pos),
+                                   size=lambda *x: setattr(self.search_left_bg, 'size', self.search_left_outer.size))
+
+        self.search_header = Label(text='', font_name="Times New Roman",
+                                  font_size=self.user_feedback_font_size,
+                                  halign='left', valign='top',
+                                  size_hint_y=None,
+                                  height=search_row_h * 2,
+                                  color=self.user_feedback_fg)
+        self.search_header.bind(size=lambda *x: setattr(self.search_header, 'text_size', self.search_header.size))
+        self.search_left_outer.add_widget(self.search_header)
+
+        self.search_input = Label(text='', font_name="Times New Roman",
+                                 font_size=self.user_feedback_font_size,
+                                 halign='left', valign='top',
+                                 size_hint_y=None,
+                                 height=search_row_h,
+                                 color=self.user_feedback_fg)
+        self.search_input.bind(size=lambda *x: setattr(self.search_input, 'text_size', self.search_input.size))
+        self.search_left_outer.add_widget(self.search_input)
+
+        # flexible spacer - without it BoxLayout anchors the fixed-height
+        # header/input to the BOTTOM of this much-taller-than-content box
+        self.search_left_outer.add_widget(Widget())
+
+        self.add_widget(self.search_left_outer)
+        self.search_left_outer.opacity = 0
+
+        self.search_right_outer = BoxLayout(orientation='vertical',
+                                           size_hint=(0.4, 0.9),
+                                           pos_hint={'right': 0.97, 'center_y': 0.5},
+                                           padding=20,
+                                           spacing=10)
+        with self.search_right_outer.canvas.before:
+            Color(*self.user_feedback_bg)
+            self.search_right_bg = Rectangle(pos=self.search_right_outer.pos, size=self.search_right_outer.size)
+        self.search_right_outer.bind(pos=lambda *x: setattr(self.search_right_bg, 'pos', self.search_right_outer.pos),
+                                    size=lambda *x: setattr(self.search_right_bg, 'size', self.search_right_outer.size))
+
+        self.search_results_col = Label(text='', font_name="Times New Roman",
+                                       font_size=self.user_feedback_font_size,
+                                       halign='left', valign='top',
+                                       markup=True,
+                                       color=self.user_feedback_fg)
+        self.search_results_col.bind(size=lambda *x: setattr(self.search_results_col, 'text_size', self.search_results_col.size))
+        self.search_right_outer.add_widget(self.search_results_col)
+
+        self.add_widget(self.search_right_outer)
+        self.search_right_outer.opacity = 0
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -459,6 +531,117 @@ class ImageViewer(FloatLayout):
         self.annotate_mode = False
         self.annotate_outer.opacity = 0
 
+    def start_search(self):
+        """Open the Search for Images box"""
+        self.search_start_pos = self.imageSet['setPos']
+        self.search_text = ''
+        self.search_groups = []
+        self.search_selected = 0
+        self.search_mode = True
+        self.search_header.text = 'Search for Images\n(Enter=go, Esc=cancel, up/down=select)'
+        self.search_input.text = '|'
+        self.update_search_results()
+        self.search_left_outer.opacity = 1
+        self.search_right_outer.opacity = 1
+
+        # hide other overlays, same as the any-keypress metadata-dismiss logic
+        Clock.unschedule(self.giant_info_clear, all=True)
+        self.giant_info_clear(0)
+        if self.metadataEvent:
+            Clock.unschedule(self.metadataEvent)
+            self.metadataEvent = None
+        self.metadata_outer.opacity = 0
+
+    def _schedule_search(self):
+        if self.search_event:
+            Clock.unschedule(self.search_event)
+        self.search_event = Clock.schedule_once(self.run_search, 1)
+
+    def compute_search_groups(self, needle):
+        """Matching images, collapsed to the first match in each directory
+        (a 'group' - eg. all matches under "objects/" vs under "happyPics/"),
+        capped at 20 groups. Grouping by directory rather than by list-index
+        adjacency matters because a directory can contain nothing but
+        matches, so two different directories' matches can otherwise land on
+        consecutive indices and wrongly merge into one group"""
+        groups = []
+        last_dir = None
+        for pos, img in enumerate(self.imageSet['orderedList']):
+            path = img['image']
+            if needle in os.path.basename(path).lower():
+                this_dir = os.path.dirname(path)
+                if groups and this_dir == last_dir:
+                    groups[-1].append(pos)
+                else:
+                    groups.append([pos])
+                last_dir = this_dir
+        return [group[0] for group in groups[:20]]
+
+    def update_search_results(self):
+        """Render the up-to-20 group results as a single column, highlighting
+        whichever one is currently selected/previewed"""
+        lines = [''] * 20
+        for i, pos in enumerate(self.search_groups):
+            path = self.imageSet['orderedList'][pos]['image']
+            filename = os.path.basename(path)
+            parent = os.path.basename(os.path.dirname(path))
+            name = f'{parent}/{filename}' if parent else filename
+            name = name[:40]
+            lines[i] = f'[b]> {name}[/b]' if i == self.search_selected else f'  {name}'
+        self.search_results_col.text = '\n'.join(lines)
+
+    def run_search(self, dt):
+        """Debounced: (re)group the matches and preview the first group"""
+        self.search_event = None
+        if not self.search_text:
+            self.search_groups = []
+            self.search_selected = 0
+            self.update_search_results()
+            self.change_to_image(self.search_start_pos)
+            return
+        needle = self.search_text.lower()
+        self.search_groups = self.compute_search_groups(needle)
+        self.search_selected = 0
+        self.update_search_results()
+        if self.search_groups:
+            self.change_to_image(self.search_groups[0])
+        else:
+            self.user_feedback('No match found', 2)
+
+    def search_nav(self, direction):
+        """Move the selection up/down the single-column results list and
+        preview whatever is now selected"""
+        if not self.search_groups or direction not in ('up', 'down'):
+            return
+        if direction == 'up':
+            new_selected = max(0, self.search_selected - 1)
+        else:
+            new_selected = min(len(self.search_groups) - 1, self.search_selected + 1)
+        if new_selected == self.search_selected:
+            return
+        self.search_selected = new_selected
+        self.update_search_results()
+        self.change_to_image(self.search_groups[self.search_selected])
+
+    def commit_search(self):
+        """Keep the currently previewed image and close the search box"""
+        if self.search_event:
+            Clock.unschedule(self.search_event)
+            self.search_event = None
+        self.search_mode = False
+        self.search_left_outer.opacity = 0
+        self.search_right_outer.opacity = 0
+
+    def cancel_search(self):
+        """Close the search box and return to the image viewed before search began"""
+        if self.search_event:
+            Clock.unschedule(self.search_event)
+            self.search_event = None
+        self.search_mode = False
+        self.search_left_outer.opacity = 0
+        self.search_right_outer.opacity = 0
+        self.change_to_image(self.search_start_pos)
+
     # move or delete image
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
@@ -631,6 +814,29 @@ class ImageViewer(FloatLayout):
                 ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
                 self.annotate_text += ch
                 self.annotate_input.text = self.annotate_text + '|'
+            return True
+
+        # SEARCH TEXT ENTRY ---- swallow all keys while typing a search query
+        if self.search_mode:
+            modifierKeycodes = ('shift', 'rshift', 'ctrl', 'lctrl', 'rctrl',
+                                 'alt', 'alt-gr', 'meta', 'lmeta', 'rmeta',
+                                 'super', 'capslock', 'numlock', 'screenlock',
+                                 'compose', 'pause')
+            if keycode[1] == 'escape':
+                self.cancel_search()
+            elif keycode[1] in ('enter', 'numpadenter'):
+                self.commit_search()
+            elif keycode[1] in ('up', 'down', 'left', 'right'):
+                self.search_nav(keycode[1])
+            elif keycode[1] == 'backspace':
+                self.search_text = self.search_text[:-1]
+                self.search_input.text = self.search_text + '|'
+                self._schedule_search()
+            elif text and text.isprintable() and keycode[1] not in modifierKeycodes:
+                ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
+                self.search_text += ch
+                self.search_input.text = self.search_text + '|'
+                self._schedule_search()
             return True
 
         # any keypress clears the giant info display and metadata display
@@ -839,6 +1045,9 @@ class ImageViewer(FloatLayout):
         elif keycode[1] == 'a':
             # `text` stays lowercase 'a' even with shift held, so use modifiers
             self.start_annotate(prefill_from_exif=('shift' not in modifiers))
+        # SEARCH -----
+        elif text == '/':
+            self.start_search()
         # # This shit never works and it crashes if window is already fullscreen
         # elif text == 'f':
         #     if self.fullscreen_mode == False:
