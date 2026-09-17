@@ -253,13 +253,14 @@ class ImageViewer(FloatLayout):
         self.annotate_outer.opacity = 0
 
         # search-for-images: two separate boxes, each ~90% of the window
-        # tall - left is instructions + the typed text, right is a single
-        # column of up to 20 results
+        # tall - one is instructions + the typed text, other is results
         search_row_h = self.user_feedback_font_size * 1.4
 
+        # Search Right Box
         self.search_left_outer = BoxLayout(orientation='vertical',
                                           size_hint=(0.2, 0.9),
-                                          pos_hint={'x': 0.03, 'center_y': 0.5},
+                                          #pos_hint={'x': 0.03, 'center_y': 0.5},
+                                          pos_hint={'right': 0.97, 'center_y': 0.5},
                                           padding=20,
                                           spacing=10)
         with self.search_left_outer.canvas.before:
@@ -293,10 +294,11 @@ class ImageViewer(FloatLayout):
         self.add_widget(self.search_left_outer)
         self.search_left_outer.opacity = 0
 
-        # Search Right Box
+        # Search Left Box
         self.search_right_outer = BoxLayout(orientation='vertical',
                                            size_hint=(0.73, 0.9),
-                                           pos_hint={'right': 0.97, 'center_y': 0.5},
+                                           #pos_hint={'right': 0.97, 'center_y': 0.5},
+                                           pos_hint={'x': 0.03, 'center_y': 0.5},
                                            padding=20,
                                            spacing=10)
         with self.search_right_outer.canvas.before:
