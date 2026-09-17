@@ -253,13 +253,14 @@ class ImageViewer(FloatLayout):
         self.annotate_outer.opacity = 0
 
         # search-for-images: two separate boxes, each ~90% of the window
-        # tall - left is instructions + the typed text, right is a single
-        # column of up to 20 results
+        # tall - one is instructions + the typed text, other is results
         search_row_h = self.user_feedback_font_size * 1.4
 
+        # Search Right Box
         self.search_left_outer = BoxLayout(orientation='vertical',
                                           size_hint=(0.2, 0.9),
-                                          pos_hint={'x': 0.03, 'center_y': 0.5},
+                                          #pos_hint={'x': 0.03, 'center_y': 0.5},
+                                          pos_hint={'right': 0.97, 'center_y': 0.5},
                                           padding=20,
                                           spacing=10)
         with self.search_left_outer.canvas.before:
@@ -293,10 +294,11 @@ class ImageViewer(FloatLayout):
         self.add_widget(self.search_left_outer)
         self.search_left_outer.opacity = 0
 
-        # Search Right Box
+        # Search Left Box
         self.search_right_outer = BoxLayout(orientation='vertical',
                                            size_hint=(0.73, 0.9),
-                                           pos_hint={'right': 0.97, 'center_y': 0.5},
+                                           #pos_hint={'right': 0.97, 'center_y': 0.5},
+                                           pos_hint={'x': 0.03, 'center_y': 0.5},
                                            padding=20,
                                            spacing=10)
         with self.search_right_outer.canvas.before:
@@ -560,23 +562,21 @@ class ImageViewer(FloatLayout):
         self.search_event = Clock.schedule_once(self.run_search, 1)
 
     def compute_search_groups(self, needle):
-        """Matching images, collapsed to the first match in each directory
-        (a 'group' - eg. all matches under "objects/" vs under "happyPics/"),
-        capped at 20 groups. Grouping by directory rather than by list-index
-        adjacency matters because a directory can contain nothing but
-        matches, so two different directories' matches can otherwise land on
-        consecutive indices and wrongly merge into one group"""
+        """Matching images, collapsed into runs of consecutive matches in
+        the ordered list (a 'group'), capped at 20 groups. A non-matching
+        image ends the current group; the next match starts a new one, so
+        a single directory can contribute more than one group if its
+        matches aren't contiguous in the list"""
         groups = []
-        last_dir = None
+        last_pos = None
         for pos, img in enumerate(self.imageSet['orderedList']):
             path = img['image']
             if needle in os.path.basename(path).lower():
-                this_dir = os.path.dirname(path)
-                if groups and this_dir == last_dir:
+                if groups and pos == last_pos + 1:
                     groups[-1].append(pos)
                 else:
                     groups.append([pos])
-                last_dir = this_dir
+                last_pos = pos
         return [group[0] for group in groups[:20]]
 
     def update_search_results(self):
