@@ -15,6 +15,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
+from kivy.uix.image import Image as KivyImage
+from kivy.animation import Animation
 from kivy.graphics import Color, Rectangle
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -32,6 +34,10 @@ class ImageViewer(FloatLayout):
             appConfig=None,
             **kwargs):
         super().__init__(**kwargs)
+
+        # slideshow cross-fade overlay/animation state (see _slideshow_advance)
+        self._fade_overlay = None
+        self._fade_anim = None
 
         # setup fullscreen status and device resolution
         if deviceRes != None:
@@ -360,6 +366,7 @@ class ImageViewer(FloatLayout):
 
     def on_size(self, obj, size):
         """Make sure all children sizes adjust properly"""
+        self._cancel_slideshow_fade()
         #Logger.debug(f"Resizing image itself to {size[0]}x{size[1]}, obj={obj}")
         self.image.size_hint_x = None
         self.image.size_hint_y = None
@@ -788,14 +795,78 @@ class ImageViewer(FloatLayout):
             Clock.unschedule(self.springbackEvent)
             self.springbackEvent = None
 
+    def _cancel_slideshow_fade(self):
+        """End any in-flight slideshow cross-fade immediately: cancel the
+        animation (no on_complete callback) and drop the overlay, revealing
+        self.image, which already holds the fully-swapped current frame
+        underneath - so this is a hard cut to 'now', not a glitch."""
+        if self._fade_anim is not None:
+            self._fade_anim.cancel(self._fade_overlay)
+            self._fade_anim = None
+        if self._fade_overlay is not None:
+            if self._fade_overlay in self.children:
+                self.remove_widget(self._fade_overlay)
+            self._fade_overlay = None
+
+    def _on_slideshow_fade_complete(self, animation, overlay):
+        if overlay is self._fade_overlay:
+            if overlay in self.children:
+                self.remove_widget(overlay)
+            self._fade_overlay = None
+            self._fade_anim = None
+
+    def _slideshow_advance(self, changeType):
+        """Advance to the next slideshow image, cross-fading the old frame
+        out to reveal the new one, which is swapped in instantly underneath."""
+        self._cancel_slideshow_fade()
+
+        # snapshot exactly what's currently visible (respects zoom/fit/scroll).
+        # Fbo-rendered textures skip the vertical flip Kivy's normal image
+        # loader applies (ImageData.flip_vertical defaults True), so without
+        # this the snapshot renders top-bottom mirrored.
+        snapshot = self.sv.export_as_image().texture
+        snapshot.flip_vertical()
+
+        overlay = KivyImage(texture=snapshot, size=self.sv.size, pos=self.sv.pos,
+                             allow_stretch=True, keep_ratio=False)
+        # the snapshot's letterbox area is transparent (Fbo clears to alpha 0),
+        # so without an opaque backing here, a new image bigger than the old
+        # one shows through the letterbox instantly instead of fading in. This
+        # backing is in the overlay's own canvas, so it fades with everything
+        # else as the overlay's opacity animates down.
+        with overlay.canvas.before:
+            Color(0, 0, 0, 1)
+            Rectangle(pos=overlay.pos, size=overlay.size)
+        # insert directly above self.sv so it only covers the image layer -
+        # feedback/metadata/search overlays (added after sv) stay on top,
+        # same as they already sit on top of self.sv today
+        self.add_widget(overlay, index=self.children.index(self.sv))
+
+        # swap the real texture underneath, invisibly, since overlay covers it
+        self.image.next_image(changeType)
+
+        fade_duration = self.slideshowInterval / 5.0
+        anim = Animation(opacity=0, duration=fade_duration, t='in_quad')
+        anim.bind(on_complete=self._on_slideshow_fade_complete)
+        self._fade_overlay = overlay
+        self._fade_anim = anim
+        anim.start(overlay)
+
     def slideshowNextImage(self, dx):
-        self.image.next_image(self.image.imageSet['changeType'])
+        self._slideshow_advance(self.image.imageSet['changeType'])
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
         Logger.debug(f"keypress - keycode={keycode}, text={text}, modifiers={modifiers}")
 
         # keyboard events hide the cursor
         Window.show_cursor = False
+
+        # any key except 's' interrupts an in-flight slideshow fade - snap to
+        # the already-swapped real image. Broader than the "cancels the
+        # slideshow" check below, since some keys (arrows, pageup/down)
+        # change the image without stopping the slideshow timer.
+        if text != 's':
+            self._cancel_slideshow_fade()
 
         # ANNOTATE TEXT ENTRY ---- swallow all keys while composing a caption
         if self.annotate_mode:
