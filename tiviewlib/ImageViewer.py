@@ -739,6 +739,24 @@ class ImageViewer(FloatLayout):
                 or self.sv.scroll_y < 0 or self.sv.scroll_y > 1):
             self.springbackEvent = Clock.schedule_interval(self.spring_back_scroll, self.scrollScheduleInterval)
 
+    def _first_zoom_from_fit(self):
+        """Zoom level for the first zoom-in from fit-to-window. Wide images
+        fit the window height, tall images fit the window width, square
+        images fill the window's larger side. If that is no bigger than the
+        current fit, zoom one normal step from the fit size instead."""
+        tw, th = self.image.texture_size
+        ww, wh = Window.size
+        fit = min(ww / tw, wh / th)
+        if tw > th:
+            target = wh / th
+        elif th > tw:
+            target = ww / tw
+        else:
+            target = max(ww / tw, wh / th)
+        if target <= fit * 1.001:
+            target = fit * 1.1
+        return target
+
     def keep_on_scrollin(self, dx):
         # scroll_x/scroll_y are only meaningful in [0, 1], but let a held key
         # push slightly past that so holding it still gives live feedback even
@@ -1076,7 +1094,10 @@ class ImageViewer(FloatLayout):
                 Window.size = (int(self.deviceRes[0] * self.windowZoom), int(self.deviceRes[1] * self.windowZoom))
                 self.size = Window.size
             else:
-                self.imgZoom *= 1.1
+                if self.image.zoomMode == 'fit':
+                    self.imgZoom = self._first_zoom_from_fit()
+                else:
+                    self.imgZoom *= 1.1
                 self.image.size[0] = self.image.texture_size[0] * self.imgZoom
                 self.image.size[1] = self.image.texture_size[1] * self.imgZoom
                 self.image.zoomMode = 'pan'
