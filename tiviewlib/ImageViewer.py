@@ -740,19 +740,17 @@ class ImageViewer(FloatLayout):
             self.springbackEvent = Clock.schedule_interval(self.spring_back_scroll, self.scrollScheduleInterval)
 
     def _first_zoom_from_fit(self):
-        """Zoom level for the first zoom-in from fit-to-window. Wide images
-        fit the window height, tall images fit the window width, square
-        images fill the window's larger side. If that is no bigger than the
-        current fit, zoom one normal step from the fit size instead."""
+        """Zoom level for the first zoom-in from fit-to-window: grow until
+        the axis that still has empty space at fit (not necessarily the
+        one matching the image's own orientation) fills the window too.
+        If that is no bigger than the current fit, zoom one normal step
+        from the fit size instead."""
         tw, th = self.image.texture_size
         ww, wh = Window.size
-        fit = min(ww / tw, wh / th)
-        if tw > th:
-            target = wh / th
-        elif th > tw:
-            target = ww / tw
-        else:
-            target = max(ww / tw, wh / th)
+        width_fit = ww / tw
+        height_fit = wh / th
+        fit = min(width_fit, height_fit)
+        target = max(width_fit, height_fit)
         if target <= fit * 1.001:
             target = fit * 1.1
         return target
