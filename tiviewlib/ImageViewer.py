@@ -24,6 +24,35 @@ from kivy.loader import Loader
 from kivy.logger import Logger
 from kivy.app import App
 from tiviewlib.MainImage import MainImage
+
+# background colour of text-entry boxes (search, tags)
+TEXT_ENTRY_BG = (0.25, 0.25, 0.25, 0.9)
+
+# max number of result groups shown in the search box
+SEARCH_MAX_RESULTS = 20
+
+# (key, description) rows for the '?' help box
+HELP_ROWS = [
+    ('arrows', 'scroll around the image'),
+    ("; '", 'prev/next image (shift = 10, ctrl = 50)'),
+    ('[ ]', 'prev/next shuffled image'),
+    (', .', 'prev/next random image'),
+    ('pgup pgdn', 'prev/next image in order'),
+    ('home end', 'first/last image'),
+    ('- =', 'zoom out/in (shift = window size)'),
+    ('z or 1', 'view 1:1'),
+    ('x', 'fit to window'),
+    ('2 3 4', 'view 2x/3x/4x size'),
+    ('s', 'slideshow (s = faster, shift-S = slower)'),
+    ('i', 'file info'),
+    ('a', 'all of window (fill, no empty space)'),
+    ('t', 'tags for image (shift-T = prefill with last text)'),
+    ('/', 'search filenames'),
+    ('?', 'this help'),
+    ('del', 'move to trash'),
+    ('mX cX', 'move/copy to config location X'),
+    ('qq', 'quit'),
+]
 #from tiviewlib.kivy_hover import MouseOver
 
 class ImageViewer(FloatLayout):
@@ -107,10 +136,10 @@ class ImageViewer(FloatLayout):
         # metadata display timer
         self.metadataEvent = None
 
-        # annotate (caption/tags) state
-        self.annotate_mode = False
-        self.annotate_text = ''
-        self.last_annotation_text = ''
+        # tags for image state
+        self.tags_mode = False
+        self.tags_text = ''
+        self.last_tags_text = ''
 
         # search state
         self.search_mode = False
@@ -201,12 +230,12 @@ class ImageViewer(FloatLayout):
         self.metadata_keys = Label(text='', font_name="Times New Roman",
                                    font_size=self.user_feedback_font_size,
                                    halign='right', valign='middle',
-                                   size_hint_y=None,
+                                   size_hint=(0.25, None),
                                    color=self.user_feedback_fg)
         self.metadata_values = Label(text='', font_name="Times New Roman",
                                      font_size=self.user_feedback_font_size,
                                      halign='left', valign='middle',
-                                     size_hint_y=None,
+                                     size_hint=(0.75, None),
                                      color=self.user_feedback_fg)
         # Set text_size with fixed width but unrestricted height (None) to allow multiline
         self.metadata_keys.bind(width=lambda *x: setattr(self.metadata_keys, 'text_size', (self.metadata_keys.width, None)))
@@ -224,39 +253,41 @@ class ImageViewer(FloatLayout):
         self.add_widget(self.metadata_outer)
         self.metadata_outer.opacity = 0
 
-        # annotate (caption/tags) text entry box - same look as metadata_outer
-        self.annotate_outer = BoxLayout(orientation='vertical',
+        # tags for image text entry box - same look as metadata_outer
+        self.tags_outer = BoxLayout(orientation='vertical',
                                        size_hint=(0.9, None),
                                        pos_hint={'center_x': 0.5, 'center_y': .5},
                                        padding=20,
                                        spacing=10)
-        self.annotate_outer.bind(minimum_height=self.annotate_outer.setter('height'))
-        with self.annotate_outer.canvas.before:
+        self.tags_outer.bind(minimum_height=self.tags_outer.setter('height'))
+        with self.tags_outer.canvas.before:
             Color(*self.user_feedback_bg)
-            self.annotate_bg = Rectangle(pos=self.annotate_outer.pos, size=self.annotate_outer.size)
-        self.annotate_outer.bind(pos=lambda *x: setattr(self.annotate_bg, 'pos', self.annotate_outer.pos),
-                                size=lambda *x: setattr(self.annotate_bg, 'size', self.annotate_outer.size))
+            self.tags_bg = Rectangle(pos=self.tags_outer.pos, size=self.tags_outer.size)
+        self.tags_outer.bind(pos=lambda *x: setattr(self.tags_bg, 'pos', self.tags_outer.pos),
+                                size=lambda *x: setattr(self.tags_bg, 'size', self.tags_outer.size))
 
-        self.annotate_header = Label(text='', font_name="Times New Roman",
+        self.tags_header = Label(text='', font_name="Times New Roman",
                                     font_size=self.user_feedback_font_size,
                                     halign='center', valign='middle',
                                     size_hint_y=None,
                                     height=self.user_feedback_font_size * 1.5,
                                     color=self.user_feedback_fg)
-        self.annotate_header.bind(size=lambda *x: setattr(self.annotate_header, 'text_size', self.annotate_header.size))
-        self.annotate_outer.add_widget(self.annotate_header)
+        self.tags_header.bind(size=lambda *x: setattr(self.tags_header, 'text_size', self.tags_header.size))
+        self.tags_outer.add_widget(self.tags_header)
 
-        self.annotate_input = Label(text='', font_name="Times New Roman",
+        self.tags_input = Label(text='', font_name="Times New Roman",
                                    font_size=self.user_feedback_font_size,
                                    halign='left', valign='middle',
+                                   padding=(10, 5),
                                    size_hint_y=None,
                                    color=self.user_feedback_fg)
-        self.annotate_input.bind(width=lambda *x: setattr(self.annotate_input, 'text_size', (self.annotate_input.width, None)))
-        self.annotate_input.bind(texture_size=lambda *x: setattr(self.annotate_input, 'height', self.annotate_input.texture_size[1]))
-        self.annotate_outer.add_widget(self.annotate_input)
+        self._add_text_entry_bg(self.tags_input)
+        self.tags_input.bind(width=lambda *x: setattr(self.tags_input, 'text_size', (self.tags_input.width, None)))
+        self.tags_input.bind(texture_size=lambda *x: setattr(self.tags_input, 'height', self.tags_input.texture_size[1]))
+        self.tags_outer.add_widget(self.tags_input)
 
-        self.add_widget(self.annotate_outer)
-        self.annotate_outer.opacity = 0
+        self.add_widget(self.tags_outer)
+        self.tags_outer.opacity = 0
 
         # search-for-images: two separate boxes, each ~90% of the window
         # tall - one is instructions + the typed text, other is results
@@ -286,12 +317,26 @@ class ImageViewer(FloatLayout):
 
         self.search_input = Label(text='', font_name="Times New Roman",
                                  font_size=self.user_feedback_font_size,
-                                 halign='left', valign='top',
+                                 halign='left', valign='middle',
+                                 padding=(10, 5),
                                  size_hint_y=None,
                                  height=search_row_h,
                                  color=self.user_feedback_fg)
         self.search_input.bind(size=lambda *x: setattr(self.search_input, 'text_size', self.search_input.size))
+        self._add_text_entry_bg(self.search_input)
         self.search_left_outer.add_widget(self.search_input)
+
+        # status line under the input: "Searching...", "N results." etc.
+        # hidden (opacity 0) until the user starts typing
+        self.search_status = Label(text='', font_name="Times New Roman",
+                                   font_size=self.user_feedback_font_size,
+                                   halign='left', valign='top',
+                                   size_hint_y=None,
+                                   height=search_row_h,
+                                   color=self.user_feedback_fg)
+        self.search_status.bind(size=lambda *x: setattr(self.search_status, 'text_size', self.search_status.size))
+        self.search_left_outer.add_widget(self.search_status)
+        self.search_status.opacity = 0
 
         # flexible spacer - without it BoxLayout anchors the fixed-height
         # header/input to the BOTTOM of this much-taller-than-content box
@@ -323,6 +368,15 @@ class ImageViewer(FloatLayout):
 
         self.add_widget(self.search_right_outer)
         self.search_right_outer.opacity = 0
+
+    def _add_text_entry_bg(self, label):
+        """Give a text-entry Label a darker grey box behind it, the full
+        width of the Label"""
+        with label.canvas.before:
+            Color(*TEXT_ENTRY_BG)
+            bg = Rectangle(pos=label.pos, size=label.size)
+        label.bind(pos=lambda *x: setattr(bg, 'pos', label.pos),
+                   size=lambda *x: setattr(bg, 'size', label.size))
 
     def _get_images(self):
         self.imageSet['orderedList'] = []
@@ -461,14 +515,7 @@ class ImageViewer(FloatLayout):
                         # and values be some group so long values wrapping don't cause mis-alignment
                         values.append(value.strip()[0:120])
 
-                self.metadata_header.text = 'TimelessIV File Info, Press Key to Dismiss'
-                self.metadata_keys.text = '\n'.join(keys)
-                self.metadata_values.text = '\n'.join(values)
-                self.metadata_outer.opacity = 1
-                # Unschedule any existing timer before scheduling a new one
-                if self.metadataEvent:
-                    Clock.unschedule(self.metadataEvent)
-                self.metadataEvent = Clock.schedule_once(lambda dt: setattr(self.metadata_outer, 'opacity', 0), 10)
+                self.show_two_columns('TimelessIV File Info, Press Key to Dismiss', keys, values, 10)
             else:
                 self.user_feedback("No metadata found or exiftool not available", 2)
         except subprocess.TimeoutExpired:
@@ -477,7 +524,7 @@ class ImageViewer(FloatLayout):
             self.user_feedback(f"Error running exiftool: {str(e)}", 2)
 
     def read_exif_comment(self, filepath):
-        """Read current EXIF UserComment ('Comment') for annotate prefill"""
+        """Read current EXIF UserComment ('Comment') for tags prefill"""
         try:
             result = subprocess.run(
                 ['exiftool', '-UserComment', '-s3', filepath],
@@ -490,7 +537,7 @@ class ImageViewer(FloatLayout):
         return ''
 
     def write_exif_comment(self, filepath, text):
-        """Write text into EXIF UserComment ('Comment' / 'Caption or Tags')"""
+        """Write text into EXIF UserComment ('Comment' / 'Tags for Image')"""
         try:
             result = subprocess.run(
                 ['exiftool', '-overwrite_original', f'-UserComment={text}', filepath],
@@ -501,18 +548,18 @@ class ImageViewer(FloatLayout):
             Logger.error(f"Error writing UserComment: {str(e)}")
             return False
 
-    def start_annotate(self, prefill_from_exif):
-        """Open the Caption or Tags entry box, prefilled from EXIF or last-typed text"""
+    def start_tags(self, prefill_from_exif):
+        """Open the Tags for Image entry box, prefilled from EXIF or last-typed text"""
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         current_file = img['image']
         if prefill_from_exif:
-            self.annotate_text = self.read_exif_comment(current_file)
+            self.tags_text = self.read_exif_comment(current_file)
         else:
-            self.annotate_text = self.last_annotation_text
-        self.annotate_mode = True
-        self.annotate_header.text = 'Caption or Tags  (Enter=save, Esc=cancel)'
-        self.annotate_input.text = self.annotate_text + '|'
-        self.annotate_outer.opacity = 1
+            self.tags_text = self.last_tags_text
+        self.tags_mode = True
+        self.tags_header.text = 'Tags for Image  (Enter=save, Esc=cancel)'
+        self.tags_input.text = self.tags_text + '|'
+        self.tags_outer.opacity = 1
 
         # hide other overlays, same as the any-keypress metadata-dismiss logic
         Clock.unschedule(self.giant_info_clear, all=True)
@@ -522,24 +569,24 @@ class ImageViewer(FloatLayout):
             self.metadataEvent = None
         self.metadata_outer.opacity = 0
 
-    def commit_annotate(self):
-        """Save the typed Caption/Tags text into EXIF and close the box"""
+    def commit_tags(self):
+        """Save the typed tags text into EXIF and close the box"""
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
         current_file = img['image']
-        ok = self.write_exif_comment(current_file, self.annotate_text)
-        self.last_annotation_text = self.annotate_text
-        self.annotate_mode = False
-        self.annotate_outer.opacity = 0
+        ok = self.write_exif_comment(current_file, self.tags_text)
+        self.last_tags_text = self.tags_text
+        self.tags_mode = False
+        self.tags_outer.opacity = 0
         if ok:
-            self.user_feedback('Caption/Tags saved', 2)
+            self.user_feedback('Tags saved', 2)
         else:
-            self.user_feedback('Failed to save Caption/Tags (exiftool error)', 3)
+            self.user_feedback('Failed to save tags (exiftool error)', 3)
 
-    def cancel_annotate(self):
+    def cancel_tags(self):
         """Close the box without writing EXIF, remembering what was typed"""
-        self.last_annotation_text = self.annotate_text
-        self.annotate_mode = False
-        self.annotate_outer.opacity = 0
+        self.last_tags_text = self.tags_text
+        self.tags_mode = False
+        self.tags_outer.opacity = 0
 
     def start_search(self):
         """Open the Search for Images box"""
@@ -550,6 +597,8 @@ class ImageViewer(FloatLayout):
         self.search_mode = True
         self.search_header.text = 'Search for Images\n(Enter=go, Esc=cancel, up/down=select)'
         self.search_input.text = '|'
+        self.search_status.text = ''
+        self.search_status.opacity = 0
         self.update_search_results()
         self.search_left_outer.opacity = 1
         self.search_right_outer.opacity = 1
@@ -563,7 +612,32 @@ class ImageViewer(FloatLayout):
             self.metadataEvent = None
         self.metadata_outer.opacity = 0
 
+    def _is_help_key(self, text, modifiers):
+        # Kivy can send text='/' for shift-/, so also check the modifiers
+        return text == '?' or (text == '/' and 'shift' in modifiers)
+
+    def show_two_columns(self, header, keys, values, clearTime):
+        """Show keys (right-justified) and values (left-justified) in the
+        metadata box, then hide it after clearTime seconds"""
+        self.metadata_header.text = header
+        self.metadata_keys.text = '\n'.join(keys)
+        self.metadata_values.text = '\n'.join(values)
+        self.metadata_outer.opacity = 1
+        # Unschedule any existing timer before scheduling a new one
+        if self.metadataEvent:
+            Clock.unschedule(self.metadataEvent)
+        self.metadataEvent = Clock.schedule_once(lambda dt: setattr(self.metadata_outer, 'opacity', 0), clearTime)
+
+    def show_help(self):
+        """Show the keyboard shortcuts in the metadata box"""
+        self.show_two_columns('Keyboard Shortcuts, Press Key to Dismiss',
+                              [k for k, _ in HELP_ROWS],
+                              [v for _, v in HELP_ROWS], 30)
+
     def _schedule_search(self):
+        # say "Searching..." at once, even though the search is debounced
+        self.search_status.text = 'Searching...'
+        self.search_status.opacity = 1
         if self.search_event:
             Clock.unschedule(self.search_event)
         self.search_event = Clock.schedule_once(self.run_search, 1)
@@ -573,7 +647,8 @@ class ImageViewer(FloatLayout):
         the ordered list (a 'group'), capped at 20 groups. A non-matching
         image ends the current group; the next match starts a new one, so
         a single directory can contribute more than one group if its
-        matches aren't contiguous in the list"""
+        matches aren't contiguous in the list. Also returns the total
+        number of groups before the cap"""
         groups = []
         last_pos = None
         for pos, img in enumerate(self.imageSet['orderedList']):
@@ -584,12 +659,12 @@ class ImageViewer(FloatLayout):
                 else:
                     groups.append([pos])
                 last_pos = pos
-        return [group[0] for group in groups[:20]]
+        return [group[0] for group in groups[:SEARCH_MAX_RESULTS]], len(groups)
 
     def update_search_results(self):
         """Render the up-to-20 group results as a single column, highlighting
         whichever one is currently selected/previewed"""
-        lines = [''] * 20
+        lines = [''] * SEARCH_MAX_RESULTS
         for i, pos in enumerate(self.search_groups):
             path = self.imageSet['orderedList'][pos]['image']
             filename = os.path.basename(path)
@@ -607,16 +682,22 @@ class ImageViewer(FloatLayout):
             self.search_groups = []
             self.search_selected = 0
             self.update_search_results()
+            self.search_status.text = ''
+            self.search_status.opacity = 0
             self.change_to_image(self.search_start_pos)
             return
         needle = self.search_text.lower()
-        self.search_groups = self.compute_search_groups(needle)
+        self.search_groups, total = self.compute_search_groups(needle)
         self.search_selected = 0
         self.update_search_results()
+        if total == 0:
+            self.search_status.text = 'No results.'
+        elif total > len(self.search_groups):
+            self.search_status.text = f'{total} results, showing {len(self.search_groups)}.'
+        else:
+            self.search_status.text = f'{total} result{"" if total == 1 else "s"}.'
         if self.search_groups:
             self.change_to_image(self.search_groups[0])
-        else:
-            self.user_feedback('No match found', 2)
 
     def search_nav(self, direction):
         """Move the selection up/down the single-column results list and
@@ -884,8 +965,8 @@ class ImageViewer(FloatLayout):
         if text != 's':
             self._cancel_slideshow_fade()
 
-        # ANNOTATE TEXT ENTRY ---- swallow all keys while composing a caption
-        if self.annotate_mode:
+        # TAGS TEXT ENTRY ---- swallow all keys while typing tags
+        if self.tags_mode:
             # bare modifier keys still fire on_key_down (and can carry junk in
             # `text` on some platforms) - never treat them as typed characters
             modifierKeycodes = ('shift', 'rshift', 'ctrl', 'lctrl', 'rctrl',
@@ -893,17 +974,17 @@ class ImageViewer(FloatLayout):
                                  'super', 'capslock', 'numlock', 'screenlock',
                                  'compose', 'pause')
             if keycode[1] == 'escape':
-                self.cancel_annotate()
+                self.cancel_tags()
             elif keycode[1] in ('enter', 'numpadenter'):
-                self.commit_annotate()
+                self.commit_tags()
             elif keycode[1] == 'backspace':
-                self.annotate_text = self.annotate_text[:-1]
-                self.annotate_input.text = self.annotate_text + '|'
+                self.tags_text = self.tags_text[:-1]
+                self.tags_input.text = self.tags_text + '|'
             elif text and text.isprintable() and keycode[1] not in modifierKeycodes:
                 # letters arrive lowercase in `text` regardless of shift state
                 ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
-                self.annotate_text += ch
-                self.annotate_input.text = self.annotate_text + '|'
+                self.tags_text += ch
+                self.tags_input.text = self.tags_text + '|'
             return True
 
         # SEARCH TEXT ENTRY ---- swallow all keys while typing a search query
@@ -937,8 +1018,9 @@ class ImageViewer(FloatLayout):
                 Clock.unschedule(self.metadataEvent)
                 self.metadataEvent = None
             self.metadata_outer.opacity = 0
-            # only return early (prevent retriggering) if 'i' was pressed
-            if text == 'i':
+            # only return early (prevent retriggering) if 'i' or '?' was
+            # pressed, so those keys toggle their display
+            if text == 'i' or self._is_help_key(text, modifiers):
                 return True
 
         # list of potential doublekeys
@@ -1134,10 +1216,25 @@ class ImageViewer(FloatLayout):
         # METADATA INFO -----
         elif text == 'i':
             self.show_exif_metadata()
-        # ANNOTATE -----
+        # TAGS FOR IMAGE -----
+        elif keycode[1] == 't':
+            # `text` stays lowercase 't' even with shift held, so use modifiers
+            self.start_tags(prefill_from_exif=('shift' not in modifiers))
+        # ALL OF WINDOW -----
         elif keycode[1] == 'a':
-            # `text` stays lowercase 'a' even with shift held, so use modifiers
-            self.start_annotate(prefill_from_exif=('shift' not in modifiers))
+            # zoom so the image fills the whole window, no empty space
+            tw, th = self.image.texture_size
+            ww, wh = Window.size
+            self.imgZoom = max(ww / tw, wh / th)
+            self.image.size[0] = tw * self.imgZoom
+            self.image.size[1] = th * self.imgZoom
+            self.image.zoomMode = 'pan'
+            self.image.set_window_pos()
+            self.sv.scroll_x = 0.5
+            self.sv.scroll_y = 0.5
+        # HELP -----
+        elif self._is_help_key(text, modifiers):
+            self.show_help()
         # SEARCH -----
         elif text == '/':
             self.start_search()

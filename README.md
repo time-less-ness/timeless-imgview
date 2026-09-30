@@ -82,8 +82,11 @@ When in the app, you may navigate images like so:
  * `qq` - Pressing Q twice will quit the program (on Mac, so will cmd-Q or cmd-W).
  * `ma` - Move to location `a` defined in config, case insensitive. Can define 25 other locations attached to letters `b-z`.
  * `ca` - Copy to location `a` defined in config, case insensitive. Can define 25 other locations attached to letters `b-z`.
- * `a` - Annotate: opens a "Caption or Tags" box prefilled from the image's existing EXIF comment. Enter saves, Esc cancels.
- * `shift-a` - Same, but prefilled with whatever you last typed in this session.
+ * `a` - All of window: zoom so the image fills the whole window, with no empty space.
+ * `t` - Tags for image: opens a "Tags for Image" box prefilled from the image's existing EXIF comment. Enter saves, Esc cancels.
+ * `shift-t` - Same, but prefilled with whatever you last typed in this session.
+ * `/` - Search filenames. Up/down selects, Enter keeps the image, Esc goes back.
+ * `?` - Show keyboard help.
 
 # Image Support
 This only supports image formats that Kivy natively supports, like JPG and PNG. Notably, it cannot
