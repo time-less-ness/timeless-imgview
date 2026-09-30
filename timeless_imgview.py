@@ -135,10 +135,17 @@ class TimelessImageView(App):
 if __name__ == '__main__':
     TimelessImageView().run()
     Logger.info(f'Writing Configuration into {config_filename}!')
-    if "Retina" in resStr:
-        # iMac27in Retina and mbp16in
-        # for some reason you have to divide window width/height by two, but not the location
-        output_geom = f"{str(int(Window.size[0]/2))}x{str(int(Window.size[1]/2))}+{str(int(Window.left))},{str(int(Window.top))}"
+    # Window.size reports physical pixels on a HiDPI screen but plain points
+    # otherwise, while Window.left/top are always points - so only size needs
+    # correcting, and only by the density of whichever screen the window is
+    # on right now (Window.dpi tracks that live, including after being moved
+    # to another monitor). Checking for "Retina" anywhere in system_profiler's
+    # output was wrong with an external monitor attached: the laptop's own
+    # Retina panel keeps matching even when the window is actually sitting on
+    # a non-scaled external display, so the size got halved when it shouldn't.
+    density = Window.dpi / 96.0
+    if density != 1:
+        output_geom = f"{str(int(Window.size[0]/density))}x{str(int(Window.size[1]/density))}+{str(int(Window.left))},{str(int(Window.top))}"
     else:
         output_geom = f"{str(Window.size[0])}x{str(Window.size[1])}+{str(Window.left)},{str(Window.top)}"
     # re-read in case another version overwrote - use fresh ConfigParser to avoid order issues
