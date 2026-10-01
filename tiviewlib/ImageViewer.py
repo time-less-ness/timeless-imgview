@@ -147,6 +147,7 @@ class ImageViewer(FloatLayout):
         self.search_start_pos = 0
         self.search_event = None
         self.search_groups = []
+        self.search_group_sizes = []
         self.search_selected = 0
 
         # for scary actions multi-key commands
@@ -328,13 +329,15 @@ class ImageViewer(FloatLayout):
 
         # status line under the input: "Searching...", "N results." etc.
         # hidden (opacity 0) until the user starts typing
+        # wraps, since this box is narrow - height follows the text
         self.search_status = Label(text='', font_name="Times New Roman",
                                    font_size=self.user_feedback_font_size,
                                    halign='left', valign='top',
                                    size_hint_y=None,
                                    height=search_row_h,
                                    color=self.user_feedback_fg)
-        self.search_status.bind(size=lambda *x: setattr(self.search_status, 'text_size', self.search_status.size))
+        self.search_status.bind(width=lambda *x: setattr(self.search_status, 'text_size', (self.search_status.width, None)))
+        self.search_status.bind(texture_size=lambda *x: setattr(self.search_status, 'height', self.search_status.texture_size[1]))
         self.search_left_outer.add_widget(self.search_status)
         self.search_status.opacity = 0
 
@@ -593,6 +596,7 @@ class ImageViewer(FloatLayout):
         self.search_start_pos = self.imageSet['setPos']
         self.search_text = ''
         self.search_groups = []
+        self.search_group_sizes = []
         self.search_selected = 0
         self.search_mode = True
         self.search_header.text = 'Search for Images\n(Enter=go, Esc=cancel, up/down=select)'
@@ -647,8 +651,9 @@ class ImageViewer(FloatLayout):
         the ordered list (a 'group'), capped at 20 groups. A non-matching
         image ends the current group; the next match starts a new one, so
         a single directory can contribute more than one group if its
-        matches aren't contiguous in the list. Also returns the total
-        number of groups before the cap"""
+        matches aren't contiguous in the list. Returns the first position
+        and size of each shown group, plus the total number of groups
+        and total matching images before the cap"""
         groups = []
         last_pos = None
         for pos, img in enumerate(self.imageSet['orderedList']):
@@ -659,7 +664,9 @@ class ImageViewer(FloatLayout):
                 else:
                     groups.append([pos])
                 last_pos = pos
-        return [group[0] for group in groups[:SEARCH_MAX_RESULTS]], len(groups)
+        shown = groups[:SEARCH_MAX_RESULTS]
+        return ([group[0] for group in shown], [len(group) for group in shown],
+                len(groups), sum(len(group) for group in groups))
 
     def update_search_results(self):
         """Render the up-to-20 group results as a single column, highlighting
@@ -672,6 +679,9 @@ class ImageViewer(FloatLayout):
             name = f'{parent}/{filename}' if parent else filename
             # truncate filenames to N characters
             name = name[:self.search_file_truncate]
+            more = self.search_group_sizes[i] - 1
+            if more:
+                name = f'{name} (and {more} more)'
             lines[i] = f'[b]> {name}[/b]' if i == self.search_selected else f'  {name}'
         self.search_results_col.text = '\n'.join(lines)
 
@@ -680,6 +690,7 @@ class ImageViewer(FloatLayout):
         self.search_event = None
         if not self.search_text:
             self.search_groups = []
+            self.search_group_sizes = []
             self.search_selected = 0
             self.update_search_results()
             self.search_status.text = ''
@@ -687,15 +698,17 @@ class ImageViewer(FloatLayout):
             self.change_to_image(self.search_start_pos)
             return
         needle = self.search_text.lower()
-        self.search_groups, total = self.compute_search_groups(needle)
+        self.search_groups, self.search_group_sizes, total, total_imgs = self.compute_search_groups(needle)
         self.search_selected = 0
         self.update_search_results()
         if total == 0:
             self.search_status.text = 'No results.'
-        elif total > len(self.search_groups):
-            self.search_status.text = f'{total} results, showing {len(self.search_groups)}.'
         else:
-            self.search_status.text = f'{total} result{"" if total == 1 else "s"}.'
+            status = (f'Found {total} image run{"" if total == 1 else "s"} with '
+                      f'{total_imgs} total image{"" if total_imgs == 1 else "s"}')
+            if total > len(self.search_groups):
+                status += f', showing {len(self.search_groups)} runs'
+            self.search_status.text = status + '.'
         if self.search_groups:
             self.change_to_image(self.search_groups[0])
 
@@ -736,9 +749,11 @@ class ImageViewer(FloatLayout):
     # move or delete image
     def move_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
-        if os.path.exists(f"{destDir}/{img['image']}"):
-            self.user_feedback(f" ! img={destDir + '/' + img['image']} exists, not moving.")
-            Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
+        # img['image'] holds the source dir too, so test only the filename in destDir
+        destPath = os.path.join(destDir, os.path.basename(img['image']))
+        if os.path.exists(destPath):
+            self.user_feedback(f" ! img={destPath} exists, not moving.")
+            Logger.critical(f"img={destPath} exists! doing nothing.")
         else:
             if "Trash" in destDir:
                 Logger.info(f"DELETE img={img['image']} to destDir={destDir}")
@@ -753,9 +768,11 @@ class ImageViewer(FloatLayout):
     # copy an image elsewhere
     def copy_image(self, destDir):
         img = self.imageSet['orderedList'][self.imageSet['setPos']]
-        if os.path.exists(f"{destDir}/{img['image']}"):
-            Logger.critical(f"img={destDir}/{img['image']} exists! doing nothing.")
-            self.user_feedback(f" ! img={destDir + '/' + img['image']} exists, not copying.")
+        # img['image'] holds the source dir too, so test only the filename in destDir
+        destPath = os.path.join(destDir, os.path.basename(img['image']))
+        if os.path.exists(destPath):
+            Logger.critical(f"img={destPath} exists! doing nothing.")
+            self.user_feedback(f" ! img={destPath} exists, not copying.")
         else:
             Logger.info(f"Copy img={img['image']} to destDir={destDir}")
             shutil.copy(img['image'], destDir)
@@ -1064,13 +1081,21 @@ class ImageViewer(FloatLayout):
         if (self.currKey != '' and self.previousKey in doubleKeycodes.keys()):
             if (self.previousKey in ['m', 'c']):
                 # move the item somewhere
+                # only the config lookup goes in this try - a move/copy
+                # failure must not show as a missing keybinding
                 try:
-                    fileDest = self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}")
-                    self.move_image(os.path.expanduser(fileDest)) if self.previousKey == 'm' else self.copy_image(os.path.expanduser(fileDest))
-                    Clock.schedule_once(self.giant_info_clear, 0.1)
-                except:
+                    fileDest = os.path.expanduser(self.appConfig.get("ReadOnlySettings", f"dest-{self.currKey}"))
+                except Exception:
+                    fileDest = None
                     Logger.info(f"Location with no keybinding={self.currKey} in config file!")
                     self.user_feedback(f"!!! Config file does not have a destination for key {self.currKey}", 3)
+                if fileDest:
+                    try:
+                        self.move_image(fileDest) if self.previousKey == 'm' else self.copy_image(fileDest)
+                    except (OSError, shutil.Error) as e:
+                        Logger.error(f"{'Move' if self.previousKey == 'm' else 'Copy'} to {fileDest} failed: {e}")
+                        self.user_feedback(f"!!! {'Move' if self.previousKey == 'm' else 'Copy'} failed: {e}", 3)
+                    Clock.schedule_once(self.giant_info_clear, 0.1)
 
             if (self.previousKey == 'q' and self.currKey == 'q'):
                 App.get_running_app().stop()
