@@ -1255,8 +1255,6 @@ class ImageViewer(FloatLayout):
             self.image.size[1] = th * self.imgZoom
             self.image.zoomMode = 'pan'
             self.image.set_window_pos()
-            self.sv.scroll_x = 0.5
-            self.sv.scroll_y = 0.5
         # HELP -----
         elif self._is_help_key(text, modifiers):
             self.show_help()
