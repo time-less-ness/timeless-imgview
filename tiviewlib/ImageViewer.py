@@ -28,7 +28,8 @@ from tiviewlib.MainImage import MainImage
 # background colour of text-entry boxes (search, tags)
 TEXT_ENTRY_BG = (0.25, 0.25, 0.25, 0.9)
 
-# max number of result groups shown in the search box
+# max number of result groups visible at once in the search box;
+# more than this scrolls
 SEARCH_MAX_RESULTS = 20
 
 # (key, description) rows for the '?' help box
@@ -149,6 +150,8 @@ class ImageViewer(FloatLayout):
         self.search_groups = []
         self.search_group_sizes = []
         self.search_selected = 0
+        # index of the first visible group in the results list
+        self.search_scroll = 0
 
         # for scary actions multi-key commands
         self.lastScaryTimestamp = 0
@@ -363,7 +366,7 @@ class ImageViewer(FloatLayout):
 
         self.search_results_col = Label(text='', font_name="Times New Roman",
                                        font_size=self.user_feedback_font_size,
-                                       halign='left', valign='top',
+                                       halign='left', valign='middle',
                                        markup=True,
                                        color=self.user_feedback_fg)
         self.search_results_col.bind(size=lambda *x: setattr(self.search_results_col, 'text_size', self.search_results_col.size))
@@ -598,6 +601,7 @@ class ImageViewer(FloatLayout):
         self.search_groups = []
         self.search_group_sizes = []
         self.search_selected = 0
+        self.search_scroll = 0
         self.search_mode = True
         self.search_header.text = 'Search for Images\n(Enter=go, Esc=cancel, up/down=select)'
         self.search_input.text = '|'
@@ -648,12 +652,11 @@ class ImageViewer(FloatLayout):
 
     def compute_search_groups(self, needle):
         """Matching images, collapsed into runs of consecutive matches in
-        the ordered list (a 'group'), capped at 20 groups. A non-matching
-        image ends the current group; the next match starts a new one, so
-        a single directory can contribute more than one group if its
-        matches aren't contiguous in the list. Returns the first position
-        and size of each shown group, plus the total number of groups
-        and total matching images before the cap"""
+        the ordered list (a 'group'). A non-matching image ends the current
+        group; the next match starts a new one, so a single directory can
+        contribute more than one group if its matches aren't contiguous in
+        the list. Returns the first position and size of each group, plus
+        the total number of groups and total matching images"""
         groups = []
         last_pos = None
         for pos, img in enumerate(self.imageSet['orderedList']):
@@ -664,15 +667,22 @@ class ImageViewer(FloatLayout):
                 else:
                     groups.append([pos])
                 last_pos = pos
-        shown = groups[:SEARCH_MAX_RESULTS]
-        return ([group[0] for group in shown], [len(group) for group in shown],
+        return ([group[0] for group in groups], [len(group) for group in groups],
                 len(groups), sum(len(group) for group in groups))
 
     def update_search_results(self):
-        """Render the up-to-20 group results as a single column, highlighting
-        whichever one is currently selected/previewed"""
-        lines = [''] * SEARCH_MAX_RESULTS
-        for i, pos in enumerate(self.search_groups):
+        """Render a window of up to SEARCH_MAX_RESULTS group results as a
+        single column, highlighting whichever one is currently
+        selected/previewed. The window scrolls one line at a time to keep
+        the selection visible"""
+        if self.search_selected < self.search_scroll:
+            self.search_scroll = self.search_selected
+        elif self.search_selected >= self.search_scroll + SEARCH_MAX_RESULTS:
+            self.search_scroll = self.search_selected - SEARCH_MAX_RESULTS + 1
+        lines = []
+        end = self.search_scroll + SEARCH_MAX_RESULTS
+        for i in range(self.search_scroll, min(end, len(self.search_groups))):
+            pos = self.search_groups[i]
             path = self.imageSet['orderedList'][pos]['image']
             filename = os.path.basename(path)
             parent = os.path.basename(os.path.dirname(path))
@@ -682,7 +692,7 @@ class ImageViewer(FloatLayout):
             more = self.search_group_sizes[i] - 1
             if more:
                 name = f'{name} (and {more} more)'
-            lines[i] = f'[b]> {name}[/b]' if i == self.search_selected else f'  {name}'
+            lines.append(f'[b]> {name}[/b]' if i == self.search_selected else f'  {name}')
         self.search_results_col.text = '\n'.join(lines)
 
     def run_search(self, dt):
@@ -692,6 +702,7 @@ class ImageViewer(FloatLayout):
             self.search_groups = []
             self.search_group_sizes = []
             self.search_selected = 0
+            self.search_scroll = 0
             self.update_search_results()
             self.search_status.text = ''
             self.search_status.opacity = 0
@@ -700,14 +711,15 @@ class ImageViewer(FloatLayout):
         needle = self.search_text.lower()
         self.search_groups, self.search_group_sizes, total, total_imgs = self.compute_search_groups(needle)
         self.search_selected = 0
+        self.search_scroll = 0
         self.update_search_results()
         if total == 0:
             self.search_status.text = 'No results.'
         else:
             status = (f'Found {total} image run{"" if total == 1 else "s"} with '
                       f'{total_imgs} total image{"" if total_imgs == 1 else "s"}')
-            if total > len(self.search_groups):
-                status += f', showing {len(self.search_groups)} runs'
+            if total > SEARCH_MAX_RESULTS:
+                status += f', showing {SEARCH_MAX_RESULTS} at a time'
             self.search_status.text = status + '.'
         if self.search_groups:
             self.change_to_image(self.search_groups[0])
