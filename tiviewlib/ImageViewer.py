@@ -384,6 +384,24 @@ class ImageViewer(FloatLayout):
         label.bind(pos=lambda *x: setattr(bg, 'pos', label.pos),
                    size=lambda *x: setattr(bg, 'size', label.size))
 
+    def _collect_dir_images(self, dirName):
+        """Add images found directly in dirName to the ordered list"""
+        # append a / for dirName
+        if dirName[-1] != '/':
+            dirName += '/'
+        try:
+            for imgName in os.listdir(dirName):
+                # until JPEG2000 support is hacked in, don't include those
+                # also animated GIF seems to kill me
+                #if imgName.lower().endswith(("jpeg", "jpg", "png", "gif", "jp2")):
+                # endswith can be a string or tuple of strings
+                if imgName.lower().endswith(("jpeg", "jpg", "png")):
+                    data = {'image': dirName + imgName, 'created': 0}
+                    self.imageSet['orderedList'].append(data)
+        except:
+            Logger.error(f"Couldn't collect images from {dirName}")
+        Logger.debug(f"Collected files from {dirName} - total so far: {len(self.imageSet['orderedList'])}")
+
     def _get_images(self):
         self.imageSet['orderedList'] = []
 
@@ -393,32 +411,41 @@ class ImageViewer(FloatLayout):
 
         # might get a file or dir as argv
         toSort = False
-        
+        inDirs = []
+
         for inArg in sys.argv[1:]:
             if os.path.isdir(inArg):
                 toSort = True
-                dirName = inArg
-                # append a / for dirName
-                if dirName[-1] != '/':
-                    dirName += '/'
-                try:
-                    for imgName in os.listdir(dirName):
-                        # until JPEG2000 support is hacked in, don't include those
-                        # also animated GIF seems to kill me
-                        #if imgName.lower().endswith(("jpeg", "jpg", "png", "gif", "jp2")):
-                        # endswith can be a string or tuple of strings
-                        if imgName.lower().endswith(("jpeg", "jpg", "png")):
-                            data = {'image': dirName + imgName, 'created': 0}
-                            self.imageSet['orderedList'].append(data)
-                except:
-                    Logger.error(f"Couldn't collect images from {dirName}")
-                Logger.debug(f"Collected files from {dirName} - total so far: {len(self.imageSet['orderedList'])}")
+                inDirs.append(inArg)
+                self._collect_dir_images(inArg)
             elif os.path.isfile(inArg):
                 toSort = False
                 data = {'image': inArg, 'created': 0}
                 self.imageSet['orderedList'].append(data)
             else:
                 Logger.error(f"Input {inArg} is neither file nor directory. Ignoring.")
+
+        # only directories and no images in them: go one level deeper
+        searchedDirs = list(inDirs)
+        if self.imageSet['orderedList'] == [] and inDirs:
+            Logger.warning(f"No images found in {', '.join(inDirs)}. Searching one level deeper for files.")
+            for dirName in inDirs:
+                try:
+                    subDirs = sorted(e.path for e in os.scandir(dirName) if e.is_dir())
+                except OSError:
+                    Logger.error(f"Couldn't list subdirectories of {dirName}")
+                    continue
+                for subDir in subDirs:
+                    searchedDirs.append(subDir)
+                    self._collect_dir_images(subDir)
+
+        # still nothing: quit
+        if self.imageSet['orderedList'] == []:
+            if searchedDirs:
+                Logger.warning(f"No images found. Empty directories: {', '.join(searchedDirs)}")
+            else:
+                Logger.warning("No files received. Quitting.")
+            sys.exit(1)
 
         # they come in some random order, so put them in filename order
         if toSort:
