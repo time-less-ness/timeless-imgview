@@ -86,6 +86,9 @@ When in the app, you may navigate images like so:
  * `t` - Tags for image: opens a "Tags for Image" box prefilled from the image's existing EXIF comment. Enter saves, Esc cancels.
  * `shift-t` - Same, but prefilled with whatever you last typed in this session.
  * `/` - Search filenames. Up/down selects, Enter keeps the image, Esc goes back.
+   Glob wildcards work: `*` is any characters, `?` is one character, `[a-z]` is one
+   character in a range (case-sensitive in brackets). Start with `re/` to use a
+   regexp instead (a final `/` is ignored).
  * `?` - Show keyboard help.
 
 # Image Support
