@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import math
 import random
@@ -31,6 +32,11 @@ TEXT_ENTRY_BG = (0.25, 0.25, 0.25, 0.9)
 # max number of result groups visible at once in the search box;
 # more than this scrolls
 SEARCH_MAX_RESULTS = 20
+
+# Kivy sends the unshifted character in `text`, so map it to the shifted
+# one (US layout) when shift is held
+SHIFTED_CHARS = dict(zip("`1234567890-=[]\\;',./",
+                         '~!@#$%^&*()_+{}|:"<>?'))
 
 # (key, description) rows for the '?' help box
 HELP_ROWS = [
@@ -647,6 +653,14 @@ class ImageViewer(FloatLayout):
             self.metadataEvent = None
         self.metadata_outer.opacity = 0
 
+    def _typed_char(self, text, modifiers):
+        # letters and symbols arrive unshifted in `text` regardless of shift state
+        if 'shift' not in modifiers:
+            return text
+        if text.isalpha():
+            return text.upper()
+        return SHIFTED_CHARS.get(text, text)
+
     def _is_help_key(self, text, modifiers):
         # Kivy can send text='/' for shift-/, so also check the modifiers
         return text == '?' or (text == '/' and 'shift' in modifiers)
@@ -677,7 +691,44 @@ class ImageViewer(FloatLayout):
             Clock.unschedule(self.search_event)
         self.search_event = Clock.schedule_once(self.run_search, 1)
 
-    def compute_search_groups(self, needle):
+    @staticmethod
+    def search_pattern(query):
+        """Compile the search query into a case-insensitive regexp. A query
+        that starts with "re/" is a regexp (an optional final "/" is
+        ignored). Else it is a shell-style glob: * is any characters, ? is
+        one character, [a-z] is one character in the range. Brackets keep
+        their case, so [A-Z] matches only capitals. The match is not
+        anchored, so "foo" finds any name that contains foo.
+        Raises re.error on a bad pattern"""
+        if query.startswith('re/'):
+            body = query[3:]
+            if body.endswith('/'):
+                body = body[:-1]
+            return re.compile(body, re.IGNORECASE)
+        out = []
+        i = 0
+        while i < len(query):
+            ch = query[i]
+            if ch == '*':
+                out.append('.*')
+            elif ch == '?':
+                out.append('.')
+            elif ch == '[' and ']' in query[i + 2:]:
+                # "[]" or "[!]" style edge cases: the first char after [ is
+                # always part of the set, so search for ] after it
+                end = query.index(']', i + 2)
+                body = query[i + 1:end]
+                if body.startswith('!'):
+                    body = '^' + body[1:]
+                body = body.replace('\\', '\\\\')
+                out.append(f'(?-i:[{body}])')
+                i = end
+            else:
+                out.append(re.escape(ch))
+            i += 1
+        return re.compile(''.join(out), re.IGNORECASE)
+
+    def compute_search_groups(self, pattern):
         """Matching images, collapsed into runs of consecutive matches in
         the ordered list (a 'group'). A non-matching image ends the current
         group; the next match starts a new one, so a single directory can
@@ -688,7 +739,7 @@ class ImageViewer(FloatLayout):
         last_pos = None
         for pos, img in enumerate(self.imageSet['orderedList']):
             path = img['image']
-            if needle in os.path.basename(path).lower():
+            if pattern.search(os.path.basename(path)):
                 if groups and pos == last_pos + 1:
                     groups[-1].append(pos)
                 else:
@@ -735,8 +786,17 @@ class ImageViewer(FloatLayout):
             self.search_status.opacity = 0
             self.change_to_image(self.search_start_pos)
             return
-        needle = self.search_text.lower()
-        self.search_groups, self.search_group_sizes, total, total_imgs = self.compute_search_groups(needle)
+        try:
+            pattern = self.search_pattern(self.search_text)
+        except re.error:
+            self.search_groups = []
+            self.search_group_sizes = []
+            self.search_selected = 0
+            self.search_scroll = 0
+            self.update_search_results()
+            self.search_status.text = 'Bad pattern.'
+            return
+        self.search_groups, self.search_group_sizes, total, total_imgs = self.compute_search_groups(pattern)
         self.search_selected = 0
         self.search_scroll = 0
         self.update_search_results()
@@ -1037,9 +1097,7 @@ class ImageViewer(FloatLayout):
                 self.tags_text = self.tags_text[:-1]
                 self.tags_input.text = self.tags_text + '|'
             elif text and text.isprintable() and keycode[1] not in modifierKeycodes:
-                # letters arrive lowercase in `text` regardless of shift state
-                ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
-                self.tags_text += ch
+                self.tags_text += self._typed_char(text, modifiers)
                 self.tags_input.text = self.tags_text + '|'
             return True
 
@@ -1060,8 +1118,7 @@ class ImageViewer(FloatLayout):
                 self.search_input.text = self.search_text + '|'
                 self._schedule_search()
             elif text and text.isprintable() and keycode[1] not in modifierKeycodes:
-                ch = text.upper() if ('shift' in modifiers and text.isalpha()) else text
-                self.search_text += ch
+                self.search_text += self._typed_char(text, modifiers)
                 self.search_input.text = self.search_text + '|'
                 self._schedule_search()
             return True
